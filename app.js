@@ -19,6 +19,13 @@ const PORT = process.env.PORT || 3000;
 const activeGames = {};
 
 /**
+ * Handle Interaction Verification requests (GET /)
+ */
+app.get('/', (_, res) => {
+  return res.sendStatus(204);
+});
+
+/**
  * Interactions endpoint URL where Discord will send HTTP requests
  * Parse request body and verifies incoming requests using discord-interactions package
  */
