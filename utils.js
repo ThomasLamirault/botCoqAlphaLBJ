@@ -42,6 +42,44 @@ export function getRandomEmoji() {
   return emojiList[Math.floor(Math.random() * emojiList.length)];
 }
 
+/**
+ * Retourne les dates (formatées en chaîne) pour lesquelles créer un channel.
+ * Format : mois-jour (ex: aout-2)
+ */
+export function getOpenDaysForCurrentAndNextMonth(currentDate = new Date()) {
+  const monthsFR = [
+    'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+    'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'
+  ];
+
+  const dates = [];
+  // On boucle sur le mois courant + le prochain (i < 2)
+  for (let i = 0; i < 2; i++) {
+    const month = currentDate.getMonth() + i;
+    let date = new Date(currentDate.getFullYear(), month, 1);
+
+    // On boucle tant qu'on est dans le mois visé
+    while (date.getMonth() === (currentDate.getMonth() + i) % 12) {
+      // getDay(): 0=Dimanche, 1=Lundi. C'est le club ouvert ces jours-là.
+      if (date.getDay() === 0 || date.getDay() === 1) {
+        const name = `${monthsFR[date.getMonth()].substring(0,5)}-${date.getDate()}`; 
+        // Note: on prend les 5 lettres pour abréger si besoin, ou le nom complet normalisé
+        dates.push(formatDateChannelName(date));
+      }
+      date.setDate(date.getDate() + 1);
+    }
+  }
+  return dates;
+}
+
+export function formatDateChannelName(date) {
+  const monthsFR = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+  // Normalisation (sans accents) et minuscules
+  const monthShort = monthsFR[date.getMonth()] 
+    .normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+  return `${monthShort}-${date.getDate()}`;
+}
+
 export function capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
