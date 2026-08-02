@@ -7,13 +7,13 @@ const client = new Client({
 });
 
 // Étape 1 : Démarrage et Installation des commandes
-client.once('ready', async () => {
+client.once('clientReady', async () => {
   console.log(`✅ ${client.user.tag} est en ligne (Mode Direct - Plus besoin de Cloudflare)`);
 
-  // On dépose la commande /createChannel immédiatement pour qu'elle apparaisse rapidement
+  // On dépose la commande /create_channel immédiatement pour qu'elle apparaisse rapidement
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   const commands = [{ 
-    name: 'createChannel', 
+    name: 'create_channel', 
     description: 'Créer les channels pour les jours du club (Lundi & Dimanche)' 
   }];
 
@@ -34,7 +34,7 @@ client.on('interactionCreate', async interaction => {
     }
 
     // --- Commande CREATE_CHANNEL (Création des salons) ---
-    if (interaction.commandName === 'createChannel') {
+    if (interaction.commandName === 'create_channel') {
       const guild = interaction.guild;
       
       // 1. Récupérer les dates du mois courant et suivant via ton code utilitaire
