@@ -40,8 +40,8 @@ client.on('interactionCreate', async interaction => {
       // 1. Récupérer les dates du mois courant et suivant via ton code utilitaire
       const datesToCreate = getOpenDaysForCurrentAndNextMonth();
 
-      // On dit au bot "Je travaille dessus..." pour éviter le timeout Discord (3s)
-      await interaction.deferReply({ flags: 64 }); 
+      // On dit au bot "Je travaille dessus..." pour éviter le timeout Discord (3s) - Public par défaut
+      await interaction.deferReply(); 
 
       let createdCount = 0;
       
