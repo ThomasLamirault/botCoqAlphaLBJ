@@ -1,46 +1,86 @@
 import 'dotenv/config';
-import express from 'express';
-import {
-  InteractionResponseFlags,
-  InteractionResponseType,
-  InteractionType,
-  MessageComponentTypes,
-  verifyKeyMiddleware,
-} from 'discord-interactions';
-import { getRandomEmoji } from './utils.js';
+import { Client, GatewayIntentBits, REST, Routes, ChannelType } from 'discord.js';
+import { getOpenDaysForCurrentAndNextMonth } from './utils.js'; // On importe la logique de dates créée précédemment
 
-const app = express();
-const PORT = process.env.PORT || 3000;
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds]
+});
 
-app.get('/', (_, res) => res.sendStatus(204));
+// Étape 1 : Démarrage et Installation des commandes
+client.once('ready', async () => {
+  console.log(`✅ ${client.user.tag} est en ligne (Mode Direct - Plus besoin de Cloudflare)`);
 
-app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async function (req, res) {
-  const { type } = req.body;
+  // On dépose la commande /createChannel immédiatement pour qu'elle apparaisse rapidement
+  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+  const commands = [{ 
+    name: 'createChannel', 
+    description: 'Créer les channels pour les jours du club (Lundi & Dimanche)' 
+  }];
 
-  if (type === InteractionType.PING) {
-    return res.send({ type: InteractionResponseType.PONG });
-  }
+  await rest.put(
+    Routes.applicationCommands(client.user.id),
+    { body: commands },
+  );
+});
 
-  if (type === InteractionType.APPLICATION_COMMAND) {
-    const { name, data } = req.body;
+// Étape 2 : Gestion des commandes (/create et /test)
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isChatInputCommand()) return;
 
-    if (name === 'test') {
-      return res.send({
-        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-        data: {
-          flags: InteractionResponseFlags.EPHEMERAL,
-          content: `hello world ${getRandomEmoji()}`
-        }
-      });
+  try {
+    // --- Commande TEST (pour vérifier le fonctionnement) ---
+    if (interaction.commandName === 'test') {
+      return await interaction.reply(`🚀 Le bot répond ! Tout est connecté correctement.`);
     }
 
-    console.error(`unknown command: ${name || 'unknown'}`);
-    return res.status(400).json({ error: 'unknown command' });
+    // --- Commande CREATE_CHANNEL (Création des salons) ---
+    if (interaction.commandName === 'createChannel') {
+      const guild = interaction.guild;
+      
+      // 1. Récupérer les dates du mois courant et suivant via ton code utilitaire
+      const datesToCreate = getOpenDaysForCurrentAndNextMonth();
+
+      // On dit au bot "Je travaille dessus..." pour éviter le timeout Discord (3s)
+      await interaction.deferReply({ flags: 64 }); 
+
+      let createdCount = 0;
+      
+      for (const dateName of datesToCreate) {
+        const channelExists = guild.channels.cache.find(ch => ch.name === dateName);
+
+        if (!channelExists) {
+          try {
+            await guild.channels.create({
+              name: dateName, // ex: "aout-2" ou "septembre-7"
+              type: ChannelType.GuildText, // Salon texte classique (8 dans certains contextes API, mais 0 ici généralement)
+              permissionOverwrites: [
+                {
+                  id: guild.roles.everyone.id, // Tout le monde
+                  allow: ['ViewChannel', 'SendMessages'],
+                },
+              ],
+            });
+            createdCount++;
+          } catch (err) {
+            console.error(`Impossible de créer ${dateName}:`, err);
+          }
+        }
+      }
+
+      // Réponse une fois fini
+      const message = createdCount > 0 
+        ? `✅ **${createdCount}** nouveaux channel(s) créé(s) pour le club !` 
+        : "ℹ️ Tous les channels existent déjà, rien à faire.";
+        
+      return await interaction.editReply({ content: message });
+    }
+
+  } catch (error) {
+    console.error(error);
+    if (!interaction.replied && !interaction.deferred) {
+      await interaction.reply({ content: '❌ Une erreur interne est survenue.', flags: 64 });
+    }
   }
-
-  return res.status(400).json({ error: 'unknown interaction type' });
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ Bot est en ligne sur le port ${PORT}`);
-});
+client.login(process.env.DISCORD_TOKEN); // Connexion au serveur Discord
