@@ -1,108 +1,56 @@
-# Getting Started app for Discord
+# 🐓 Bot Discord CoqAlpha LBJ
 
-This project contains a basic rock-paper-scissors-style Discord app written in JavaScript, built for the [getting started guide](https://discord.com/developers/docs/getting-started).
+Bienvenue sur le dépôt officiel du bot Discord dédié au club **Coq Alpha LBJ**. Ce bot gère l'automatisation des salons pour les séances et propose des interactions ludiques (minigames) pour la communauté.
 
-![Demo of app](https://github.com/discord/discord-example-app/raw/main/assets/getting-started-demo.gif?raw=true)
+## ✨ Fonctionnalités
 
-## Project structure
-Below is a basic overview of the project structure:
+### 🗓 Automatisation des Salons (Channel Creator)
+Le bot calcule automatiquement les dates d'ouverture du club pour le mois en cours et le suivant.
+- Création automatique des channels : `août-x`, `septembre-y`, etc.
+- Synchronisation hebdomadaire (Lundi & Dimanche).
+- Permission par défaut : Visible/Envoyer des messages pour tout le monde (#everyone).
 
-```
-├── examples    -> short, feature-specific sample apps
-│   ├── app.js  -> finished app.js code
-│   ├── button.js
-│   ├── command.js
-│   ├── modal.js
-│   ├── selectMenu.js
-├── .env.sample -> sample .env file
-├── app.js      -> main entrypoint for app
-├── commands.js -> slash command payloads + helpers
-├── game.js     -> logic specific to RPS
-├── utils.js    -> utility functions and enums
-├── package.json
-├── README.md
-└── .gitignore
-```
+### 🎮 Minigame / Interactions
+Le bot inclut une logique de jeu interactive (Pierre-Feuille-Ciseaux) adaptée au contexte, visible dans `game.js`.
+Il supporte les composants Discord interactifs (sélecteurs, boutons).
 
-## Running app locally
+## 🚀 Installation & Démarrage
 
-Before you start, you'll need to install [NodeJS](https://nodejs.org/en/download/) and [create a Discord app](https://discord.com/developers/applications) with the proper permissions:
-- `applications.commands`
-- `bot` (with Send Messages enabled)
+Ce projet nécessite **Node.js >= 18** pour fonctionner.
 
-
-Configuring the app is covered in detail in the [getting started guide](https://discord.com/developers/docs/getting-started).
-
-### Setup project
-
-First clone the project:
-```
-git clone https://github.com/discord/discord-example-app.git
+### 1. Cloner le projet
+```bash
+git clone https://github.com/ThomasLamirault/botCoqAlphaLBJ.git
+cd botCoqAlphaLBJ
 ```
 
-Then navigate to its directory and install dependencies:
-```
-cd discord-example-app
+### 2. Installer les dépendances
+```bash
 npm install
 ```
-### Get app credentials
 
-Fetch the credentials from your app's settings and add them to a `.env` file (see `.env.sample` for an example). You'll need your app ID (`APP_ID`), bot token (`DISCORD_TOKEN`), and public key (`PUBLIC_KEY`).
+### 3. Configuration (Important)
+Le bot a besoin de variables d'environnement pour s'authentifier. Créez un fichier `.env` à la racine :
 
-Fetching credentials is covered in detail in the [getting started guide](https://discord.com/developers/docs/getting-started).
+| Clé | Description | Exemple |
+|-----|-------------|---------|
+| `DISCORD_TOKEN` | Le token secret de ton bot (Dashboard Discord) | `MTUyODgx...` |
+| `APP_ID` | L'ID de l'application Discord | `152881639...` |
+| `PUBLIC_KEY` | La clé publique du bot | `d0102b...` |
 
-> 🔑 Environment variables can be added to the `.env` file in Glitch or when developing locally, and in the Secrets tab in Replit (the lock icon on the left).
+## 📂 Structure du code
 
-### Install slash commands
+- **`app.js`** : Le cœur du-bot. Gère le cycle de vie, la configuration des channels et les événements Discord (`clientReady`, `interactionCreate`).
+- **`utils.js`** : Fonctions utilitaires pour la gestion des dates (`getOpenDays...`) et les requêtes API Discord.
+- **`game.js`** : Logique pure du jeu (algorithme Pierre-Feuille-Ciseaux, verbes d'action, emojis).
+- **`commands.js`** : Déclaration et installation des commandes globales auprès de l'API Discord.
 
-The commands for the example app are set up in `commands.js`. All of the commands in the `ALL_COMMANDS` array at the bottom of `commands.js` will be installed when you run the `register` command configured in `package.json`:
+## ⚡ Commandes Bot
 
-```
-npm run register
-```
+| Commande | Description | Permission |
+|----------|-------------|------------|
+| `/test` | Vérifie que le bot écoute bien les événements. | Tous |
+| `/create_channel` | Déclenche la génération des channels du mois. | Admin/Modérateur |
 
-### Run the app
-
-After your credentials are added, go ahead and run the app:
-
-```
-node app.js
-```
-
-> ⚙️ A package [like `nodemon`](https://github.com/remy/nodemon), which watches for local changes and restarts your app, may be helpful while locally developing.
-
-If you aren't following the [getting started guide](https://discord.com/developers/docs/getting-started), you can move the contents of `examples/app.js` (the finished `app.js` file) to the top-level `app.js`.
-
-### Set up interactivity
-
-The project needs a public endpoint where Discord can send requests. To develop and test locally, you can use something like [`ngrok`](https://ngrok.com/) to tunnel HTTP traffic.
-
-Install ngrok if you haven't already, then start listening on port `3000`:
-
-```
-ngrok http 3000
-```
-
-You should see your connection open:
-
-```
-Tunnel Status                 online
-Version                       2.0/2.0
-Web Interface                 http://127.0.0.1:4040
-Forwarding                    https://1234-someurl.ngrok.io -> localhost:3000
-
-Connections                  ttl     opn     rt1     rt5     p50     p90
-                              0       0       0.00    0.00    0.00    0.00
-```
-
-Copy the forwarding address that starts with `https`, in this case `https://1234-someurl.ngrok.io`, then go to your [app's settings](https://discord.com/developers/applications).
-
-On the **General Information** tab, there will be an **Interactions Endpoint URL**. Paste your ngrok address there, and append `/interactions` to it (`https://1234-someurl.ngrok.io/interactions` in the example).
-
-Click **Save Changes**, and your app should be ready to run 🚀
-
-## Other resources
-- Read **[the documentation](https://discord.com/developers/docs/intro)** for in-depth information about API features.
-- Browse the `examples/` folder in this project for smaller, feature-specific code examples
-- Join the **[Discord Developers server](https://discord.gg/discord-developers)** to ask questions about the API, attend events hosted by the Discord API team, and interact with other devs.
-- Check out **[community resources](https://discord.com/developers/docs/topics/community-resources#community-resources)** for language-specific tools maintained by community members.
+---
+*Ce projet est sous licence MIT. Inspiré par [discord/getting-started] mais adapté pour l'usage local.*
