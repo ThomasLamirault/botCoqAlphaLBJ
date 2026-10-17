@@ -1,6 +1,6 @@
 # 🐓 Bot Discord CoqAlpha LBJ
 
-Bienvenue sur le dépôt officiel du bot Discord dédié au club **Coq Alpha LBJ**. Ce bot gère l'automatisation des salons pour les séances et propose des interactions ludiques (minigames) pour la communauté.
+Bienvenue sur le dépôt officiel du bot Discord dédié au club **Coq Alpha LBJ**. Ce bot gère l'automatisation des salons pour les séances du club.
 
 ## ✨ Fonctionnalités
 
@@ -9,10 +9,6 @@ Le bot calcule automatiquement les dates d'ouverture du club pour le mois en cou
 - Création automatique des channels : `août-x`, `septembre-y`, etc.
 - Synchronisation hebdomadaire (Lundi & Dimanche).
 - Permission par défaut : Visible/Envoyer des messages pour tout le monde (#everyone).
-
-### 🎮 Minigame / Interactions
-Le bot inclut une logique de jeu interactive (Pierre-Feuille-Ciseaux) adaptée au contexte, visible dans `game.js`.
-Il supporte les composants Discord interactifs (sélecteurs, boutons).
 
 ## 🚀 Installation & Démarrage
 
@@ -42,7 +38,6 @@ Le bot a besoin de variables d'environnement pour s'authentifier. Créez un fich
 
 - **`app.js`** : Le cœur du-bot. Gère le cycle de vie, la configuration des channels et les événements Discord (`clientReady`, `interactionCreate`).
 - **`utils.js`** : Fonctions utilitaires pour la gestion des dates (`getOpenDays...`) et les requêtes API Discord.
-- **`game.js`** : Logique pure du jeu (algorithme Pierre-Feuille-Ciseaux, verbes d'action, emojis).
 - **`commands.js`** : Déclaration et installation des commandes globales auprès de l'API Discord.
 
 ## ⚡ Commandes Bot

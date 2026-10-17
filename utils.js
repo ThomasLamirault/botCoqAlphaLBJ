@@ -36,48 +36,50 @@ export async function InstallGlobalCommands(appId, commands) {
   }
 }
 
-// Simple method that returns a random emoji from list
-export function getRandomEmoji() {
-  const emojiList = ['😭','😄','😌','🤓','😎','😤','🤖','😶‍🌫️','🌏','📸','💿','👋','🌊','✨'];
-  return emojiList[Math.floor(Math.random() * emojiList.length)];
-}
+const MONTHS_FR =  ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
 
 /**
- * Retourne les dates (formatées en chaîne) pour lesquelles créer un channel.
- * Format : mois-jour (ex: aout-2)
+ * Retourne les objets Date des dimanches (0) et des lunis (1)
+ * du mois courant + du mois suivant.
+ * Gère le passage à l'année suivante : déc. 2026 + janv. 2027.
  */
-export function getOpenDaysForCurrentAndNextMonth(currentDate = new Date()) {
-  const monthsFR = [
-    'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
-    'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'
-  ];
-
+export function getOpenDatesForCurrentAndNextMonth(currentDate = new Date()) {
   const dates = [];
-  // On boucle sur le mois courant + le prochain (i < 2)
-  for (let i = 0; i < 2; i++) {
-    const month = currentDate.getMonth() + i;
-    let date = new Date(currentDate.getFullYear(), month, 1);
 
-    // On boucle tant qu'on est dans le mois visé
-    while (date.getMonth() === (currentDate.getMonth() + i) % 12) {
-      // getDay(): 0=Dimanche, 1=Lundi. C'est le club ouvert ces jours-là.
+  // Mois courant + mois suivant
+  for (let i = 0; i < 2; i++) {
+    const targetMonth = currentDate.getMonth() + i;
+    // Le % 12 gère le passage de décembre (11) à janvier (12 % 12 = 0)
+    let date = new Date(currentDate.getFullYear(), targetMonth, 1);
+
+    while (date.getMonth() === targetMonth % 12) {
+      // getDay() : 0 = dimanche, 1 = lundi → jours ouverts du club
       if (date.getDay() === 0 || date.getDay() === 1) {
-        const name = `${monthsFR[date.getMonth()].substring(0,5)}-${date.getDate()}`; 
-        // Note: on prend les 5 lettres pour abréger si besoin, ou le nom complet normalisé
-        dates.push(formatDateChannelName(date));
+        dates.push(new Date(date));
       }
       date.setDate(date.getDate() + 1);
     }
   }
+
   return dates;
 }
 
 export function formatDateChannelName(date) {
-  const monthsFR = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
   // Normalisation (sans accents) et minuscules
-  const monthShort = monthsFR[date.getMonth()] 
+  const monthShort = MONTHS_FR[date.getMonth()]
     .normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
   return `${monthShort}-${date.getDate()}`;
+}
+
+/**
+ * Nom de la catégorie Discord à laquelle rattacher le salon d'une date.
+ *  - dimanche → « Les DIMANCHE LBJ <année> »
+ *  - lundi    → « Les LUNDI LBJ <année> »
+ * L'année provient de la date du salon (2026, puis 2027 au 1er janvier…).
+ */
+export function getCategoryNameForDate(date) {
+  const dayLabel = date.getDay() === 0 ? 'DIMANCHE' : 'LUNDI';
+  return `Les ${dayLabel} LBJ ${date.getFullYear()}`;
 }
 
 export function capitalize(str) {

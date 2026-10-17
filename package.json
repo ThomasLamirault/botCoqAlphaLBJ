@@ -1,8 +1,8 @@
 {
-  "name": "discord-getting-started",
+  "name": "bot-coqalpha-lbj",
   "private": true,
   "version": "1.0.0",
-  "description": "Discord example app",
+  "description": "Bot Discord du club Coq Alpha LBJ — automatisation des salons",
   "main": "app.js",
   "type": "module",
   "engines": {
@@ -12,9 +12,9 @@
     "start": "node app.js",
     "register": "node commands.js",
     "dev": "nodemon app.js",
-    "test": "vitest"
+    "test": "vitest run"
   },
-  "author": "Shay DeWael",
+  "author": "Thomas Lamirault",
   "license": "MIT",
   "dependencies": {
     "discord.js": "^14.14.1",
