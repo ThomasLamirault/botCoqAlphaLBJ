@@ -89,9 +89,14 @@ client.on('interactionCreate', async interaction => {
             console.error(`Impossible de créer ${dateName}:`, err);
           }
         } else if (channelExists.parentId !== category.id) {
-          // Salon déjà existant mais hors de sa catégorie : le réorganiser
+          // Salon déjà existant mais hors de sa catégorie : le réorganiser.
+          // discord.js v14 a supprimé channel.move() → on utilise
+          // guild.channels.edit() (qui passe par PATCH /channels/{id} avec parent_id).
           try {
-            await channelExists.move({ channelId: category.id });
+            await guild.channels.edit(channelExists, {
+              parent: category,
+              reason: `Réorganisation de « ${dateName} » dans « ${categoryName} »`,
+            });
             movedCount++;
           } catch (err) {
             console.error(`Impossible de déplacer ${dateName} dans « ${categoryName} » :`, err);
