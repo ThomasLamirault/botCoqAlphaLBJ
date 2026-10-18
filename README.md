@@ -38,7 +38,8 @@ Le bot a besoin de variables d'environnement pour s'authentifier. Créez un fich
 
 - **`app.js`** : Le cœur du-bot. Gère le cycle de vie, la configuration des channels et les événements Discord (`clientReady`, `interactionCreate`).
 - **`utils.js`** : Fonctions utilitaires pour la gestion des dates (`getOpenDays...`) et les requêtes API Discord.
-- **`commands.js`** : Déclaration et installation des commandes globales auprès de l'API Discord.
+- **`commands.js`** : Déclaration (source unique) des commandes globales (`ALL_COMMANDS`) : `/test` + `/create_channel`.
+- **`register.js`** : Installation des commandes globales (`npm run register` — bulk overwrite).
 
 ## ⚡ Commandes Bot
 

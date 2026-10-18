@@ -2,7 +2,8 @@
 
 > **Méthode** : découpage en modules profonds (seams, interfaces minces, implementation riche).
 > **Source de vérité** : cette documentation est générée à partir de l'état réel du code
-> (commit `07597ef`, 18/10/2026 — `npm i -g npm@12.2.0` installé sur la machine du bot).
+> (18/10/2026, post-fix « source unique des commandes » ; `npm i -g npm@12.2.0`
+> installé sur la machine du bot).
 > Chaque section se base sur ce que le code fait **aujourd'hui**, pas sur ce qu'on aimerait.
 
 ---
@@ -29,9 +30,10 @@ déplacés de `Les DIMANCHE LBJ 2025` → `Les DIMANCHE LBJ 2026`.
 │ app.js — RUNTIME (point d'entrée unique, node app.js)      │
 ├──────────────────────────────┬─────────────────────────────┤
 │ clientReady                  │ interactionCreate           │
-│ • REST PUT (bulk overwrite)  │ • /test  → reply immédiat  │
-│   /applications/{id}/commands│ • /create_channel →        │
-│ • client.login()             │   deferReply()             │
+│ • InstallGlobalCommands(     │ • /test  → reply immédiat  │
+│   client.user.id,            │ • /create_channel →        │
+│   ALL_COMMANDS)              │   deferReply()             │
+│ • client.login()             │                            │
 │                              │   for date in dates:       │
 └───────────────┬──────────────┤   • category ? sinon create│
                 │              └─────────────────────────────┘
@@ -48,8 +50,12 @@ déplacés de `Les DIMANCHE LBJ 2025` → `Les DIMANCHE LBJ 2026`.
                   └───────────────────────┘
 
 ┌────────────────────────────────────────────────────────────┐
-│ commands.js — SCRIPT (npm run register)                     │
-│ • ALL_COMMANDS = [ /test ]                                 │
+│ commands.js — DÉFINITIONS (source unique)                  │
+│ • CREATE_CHANNEL_COMMAND, TEST_COMMAND                     │
+│ • export ALL_COMMANDS (2 commandes, même shape)            │
+└────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│ register.js — SCRIPT (npm run register)                    │
 │ • InstallGlobalCommands(APP_ID, ALL_COMMANDS)  [utils.js]  │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -60,7 +66,8 @@ déplacés de `Les DIMANCHE LBJ 2025` → `Les DIMANCHE LBJ 2026`.
 |---|---|---|
 | `app.js` | Runtime (1 seul) | 2 événements + `login()` ; le seul code avec effet réel côté Discord |
 | `utils.js` | Bibliothèque | 5 exports : `DiscordRequest`, `InstallGlobalCommands`, `getOpenDatesForCurrentAndNextMonth`, `formatDateChannelName`, `getCategoryNameForDate`, `capitalize` |
-| `commands.js` | Script standalone | 1 appel : `InstallGlobalCommands(APP_ID, ALL_COMMANDS)` |
+| `commands.js` | Bibliothèque (définitions) | 1 export : `ALL_COMMANDS` (`/create_channel` + `/test`) |
+| `register.js` | Script standalone | 1 appel : `InstallGlobalCommands(APP_ID, ALL_COMMANDS)` |
 | `tests/utils.test.js` | vitest | 4 tests (tous sur `utils.js`) |
 | `.env` | Configuration (gitignored) | `APP_ID`, `DISCORD_TOKEN`, `PUBLIC_KEY` |
 
@@ -93,22 +100,23 @@ Interface externe : **1 interaction** `/create_channel` → **1 message récapit
 
 Intérieur : algorithme idempotent par date (voir §3.M2 et §4).
 
-### C3 — Discord API (seam le plus instable du repo)
+### C3 — Discord API
 
-**Deux clients HTTP coexistent** (incohérence majeure, §6.1) :
+**Une seule source de vérité des commandes** (`commands.js` → `ALL_COMMANDS`),
+utilisée par deux points d'entrée qui enregistrent exactement la même liste :
 
-| Utilisé par | Mécanisme | Endpoint |
+| Point d'entrée | Mécanisme | Endpoint |
 |---|---|---|
-| `app.js` (clientReady) | `REST` de discord.js (`PUT`) | `applications/{client.user.id}/commands` |
-| `commands.js` (`npm run register`) | `fetch` brut via `utils.DiscordRequest` (`PUT`) | `applications/${APP_ID}/commands` |
-| `app.js` (création/salon) | `guild.channels.create()` / `.edit()` | `channels`, `guilds/{id}/channels` |
+| `app.js` (`clientReady`) | `InstallGlobalCommands(client.user.id, ALL_COMMANDS)` (fetch) | `applications/{id}/commands` (PUT, bulk overwrite) |
+| `register.js` (`npm run register`) | `InstallGlobalCommands(APP_ID, ALL_COMMANDS)` (fetch) | idem |
+| `app.js` (création/salon) | `guild.channels.create()` / `.edit()` (discord.js) | `channels`, `guilds/{id}/channels` |
 
 ### C4 — Configuration (`.env`, ignoré par Git)
 
 | Clé | Consommée par | Statut |
 |---|---|---|
 | `DISCORD_TOKEN` | `app.js` (login + REST) | **Critique runtime** (72 chars) |
-| `APP_ID` | `commands.js` (register script) | 19 chars — **pas utilisé par le runtime** (app.js utilise `client.user.id`) |
+| `APP_ID` | `register.js` (install script) | 19 chars — **non lu par le runtime** (clientReady utilise `client.user.id`, identique) |
 | `PUBLIC_KEY` | **Aucune ligne de code** | 64 chars — clé legacy (auth PEM, retirée du code par le commit `e0f5bea` « Cleanup: Remove secrets… ») |
 
 ### C5 — Tests (vitest)
@@ -180,17 +188,21 @@ Surface : 4 tests, tous ciblant C1 (moteur calendrier). C2 n'est pas testé.
   du club » est concentrée ici — c'est le seul endroit à relire quand on change
   la règle (ex. ajouter un jour « samedi »).
 
-### M3 — Enregistrement des commandes (deux implémentations, 1 contrat)
+### M3 — Enregistrement des commandes (1 contrat, 1 liste, 2 entry points)
 
-Contrat : **bulk overwrite** des commandes globales de l'application Discord.
+Contrat : **bulk overwrite** des commandes globales de l'application Discord
+(PUT `applications/{id}/commands`).
 
-- Implémentation A (runtime) : `app.js` `clientReady` — `rest.put(
-  Routes.applicationCommands(client.user.id), { body: [create_channel] })`.
-  **Uniquement `/create_channel`.**
-- Implémentation B (script) : `commands.js` — `InstallGlobalCommands(APP_ID,
-  [test])`. **Uniquement `/test`.**
+- **Définitions** : `ALL_COMMANDS` dans `commands.js` (seule source de vérité)
+  = `/create_channel` + `/test`, même shape (type 1, integration_types [0,1],
+  contexts [0,1,2]).
+- **Entry point runtime** : `app.js` `clientReady` →
+  `InstallGlobalCommands(client.user.id, ALL_COMMANDS)`.
+- **Entry point script** : `register.js` (`npm run register`) →
+  `InstallGlobalCommands(APP_ID, ALL_COMMANDS)`.
 
-→ Deux listes disjoints qui écrasent l'autre (voir §6.1, risque critique).
+Plus d'écrasement croisé : les deux entry points enregistrent exactement
+la même liste, au moment où ils s'exécutent.
 
 ---
 
@@ -287,34 +299,34 @@ aux appels REST réels. Impossible de tester en unit sans extraction.
 
 ## 6. Incohérences connues & dette technique
 
-### 6.1 ⚠️ Critique : double enregistrement de commandes, bulk overwrite
+### 6.1 ✅ Résolu (18/10/2026) : double enregistrement de commandes, bulk overwrite
 
-`npm run register` **et** `clientReady` écrasent **l'ensemble** des commandes globales
-(PUT = bulk overwrite sur `applications/{id}/commands`) :
+**Symptom** : `npm run register` **et** `clientReady` écrasaient **l'ensemble**
+des commandes globales (PUT = bulk overwrite sur `applications/{id}/commands`)
+avant avec des listes disjointes (`/test` seul vs `/create_channel` seul).
+Conséquence : à chaque redémarrage, `/test` disparaissait des commandes
+globales (et `npm run register` après un démarrage écrasait
+`/create_channel` jusqu'au prochain restart).
 
-| Source | Liste envoyée |
-|---|---|
-| `commands.js` (register) | `/test` |
-| `app.js` (clientReady) | `/create_channel` |
+**Fix appliqué** :
+- `commands.js` → **définitions pures** : export `ALL_COMMANDS`
+  (`/create_channel` + `/test`, même shape).
+- Nouveau `register.js` : le seul script d'installation
+  (`InstallGlobalCommands(APP_ID, ALL_COMMANDS)`).
+- `app.js` `clientReady` : `InstallGlobalCommands(client.user.id, ALL_COMMANDS)`.
+- `package.json` : `"register": "node register.js"`.
 
-**Conséquence** : le *dernier* enregistrement gagne. À chaque redémarrage du bot,
-`/test` **disparaît** des commandes globales (seul `/create_channel` est
-registré à runtime). Le handler de `/test` existe dans le code mais la commande
-n'est plus exposée à Discord. De plus, si on lance `npm run register` **après**
-un démarrage du bot, `/create_channel` disparaît globalement… jusqu'au
-prochain restart.
+Résultat : 1 contrat + 1 liste + 2 entry points identiques (voir §3.M3, §2.C3).
 
-→ **Action** : une seule source de vérité des commandes (module partagé, voir
-§7), utilisée par `clientReady` **et** `commands.js`.
+### 6.2 Deux clients Discord API (consolidation partiellement faite)
 
-### 6.2 Deux clients Discord API
-
-- `discord.js` REST (app.js) — recommandé, gère auth + retries.
-- `fetch` brut (`utils.DiscordRequest`, commands.js) — User-Agent custom,
-  `throw` avec JSON d'erreur.
-
-→ **Action** : déléguer `InstallGlobalCommands` au REST de discord.js (ou
-l'inverse) ; supprimer `DiscordRequest` s'il n'est plus nécessaire.
+Après le fix §6.1, l'inscription des commandes passe par un **seul** client
+(`utils.DiscordRequest`, fetch brut, User-Agent custom). Le REST de discord.js
+n'est plus utilisé explicitement que par les managers `guild.channels.*`.
+Résidu : `DiscordRequest` n'est utilisé que pour l'inscription des commandes.
+→ **Action** (facultative) : migrer `InstallGlobalCommands` vers le REST de
+discord.js (retries, auth intégrés) et supprimer `DiscordRequest` +
+`capitalize`.
 
 ### 6.3 Code et config morts
 
@@ -322,8 +334,8 @@ l'inverse) ; supprimer `DiscordRequest` s'il n'est plus nécessaire.
 |---|---|
 | `utils.capitalize` | Jamais appelé |
 | `.env : PUBLIC_KEY` (64 chars) | Aucune référence dans le code — legacy de l'auth PEM (commit `e0f5bea`) |
-| `/test` (global) | Effectivement non enregistré au runtime (voir 6.1) |
-| `npm run register` | Pédagogue mais piégeux (bulk overwrite) — voir 6.1 |
+| `/test` (global) | Enregistré au runtime et par `register.js` (fix §6.1) |
+| `npm run register` | Sûr : bulk overwrite de la même liste que le runtime — utile sans démarrer le bot |
 
 ### 6.4 Robustesse du runtime
 
@@ -346,10 +358,9 @@ devenant testable au premier TDD.
 
 ```
 src/
-├── commands/
-│   └── index.ts              → UNIQUE source de vérité des commandes
-│                               (definition + descriptions), exportée pour
-│                               app.js (clientReady) ET commands.js
+├── commands (déjà en place, fix §6.1)
+│   ├── commands.js           → UNIQUE source de vérité : ALL_COMMANDS
+│   └── register.js           → entry point `npm run register`
 ├── calendar/
 │   └── index.ts              → C1 : getOpenDatesForCurrentAndNextMonth,
 │                               formatDateChannelName, getCategoryNameForDate
@@ -375,7 +386,8 @@ tests/
 ```
 
 **Critères de gain** (leverages) :
-- `/test` et `/create_channel` ne peuvent plus diverger (1 source de vérité).
+- ✅ **Déjà acquis (fix §6.1)** : `/test` et `/create_channel` ne peuvent plus
+  diverger (1 source de vérité, 2 entry points identiques).
 - M2 testable sans serveur Discord (fake + résultats puits).
 - 1 seul client REST (localité des erreurs Discord).
 - `app.js` < 20 lignes : lecture instantanée du runtime.
@@ -398,7 +410,7 @@ tests/
 |---|---|---|
 | `start` | `node app.js` | Runtime du bot |
 | `dev` | `nodemon app.js` | Runtime avec reload |
-| `register` | `node commands.js` | Bulk overwrite `/test` globaux ⚠️ (voir 6.1) |
+| `register` | `node register.js` | Bulk overwrite des 2 commandes globales |
 | `test` | `vitest run` | 4 tests (M1) |
 
 ### C. Événements discord.js utilisés
@@ -416,5 +428,8 @@ tests/
   `Les DIMANCHE/LUNDI LBJ <année>`, `utils.js` testable).
 - `07597ef` — **Fix crash** : `channel.move()` (supprimé en v14) →
   `guild.channels.edit(channel, { parent })`.
+- (fix §6.1, 18/10) — **Source unique des commandes** : `commands.js` exporte
+  `ALL_COMMANDS` ; nouveau `register.js` ; `clientReady` et `npm run register`
+  enregistrent la même liste.
 - Machine du bot (Ubuntu, `/home/ubuntu/botCoqAlphaLBJ`) : installation
   `npm@12.2.0` globale (OOM résolé, 2 GiB RAM).

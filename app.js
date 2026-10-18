@@ -1,10 +1,12 @@
 import 'dotenv/config';
-import { Client, GatewayIntentBits, REST, Routes, ChannelType } from 'discord.js';
+import { Client, GatewayIntentBits, ChannelType } from 'discord.js';
 import {
   getOpenDatesForCurrentAndNextMonth,
   formatDateChannelName,
   getCategoryNameForDate,
+  InstallGlobalCommands,
 } from './utils.js';
+import { ALL_COMMANDS } from './commands.js';
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds]
@@ -14,17 +16,10 @@ const client = new Client({
 client.once('clientReady', async () => {
   console.log(`✅ ${client.user.tag} est en ligne (Mode Direct - Plus besoin de Cloudflare)`);
 
-  // On dépose la commande /create_channel immédiatement pour qu'elle apparaisse rapidement
-  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-  const commands = [{ 
-    name: 'create_channel',
-    description: 'Créer les channels du club (dimanche & lundi) dans les bonnes catégories'
-  }];
-
-  await rest.put(
-    Routes.applicationCommands(client.user.id),
-    { body: commands },
-  );
+  // On dépose TOUTES les commandes globales immédiatement (source unique :
+  // commands.js) pour qu'elles apparaissent rapidement.
+  await InstallGlobalCommands(client.user.id, ALL_COMMANDS);
+  console.log(`✅ ${ALL_COMMANDS.length} commande(s) installée(s) globalement`);
 });
 
 // Étape 2 : Gestion des commandes (/create et /test)

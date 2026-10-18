@@ -1,3 +1,5 @@
 node_modules
 .env
 *.pem
+# CODING_STANDARDS.md : local, jamais versionné
+CODING_STANDARDS.md
