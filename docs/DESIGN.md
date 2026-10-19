@@ -164,9 +164,12 @@ Surface : 4 tests, tous ciblant C1 (moteur calendrier). C2 n'est pas testé.
 │ DEEP IMPLEMENTATION                       │
 │   • deferReply() public (anti-timeout)    │
 │   • for date of getOpenDates…() :         │
-│       • category = cache.find(name)       │
-│         → sinon guild.channels.create     │
-│         │  (type GUILD_CATEGORY)          │
+│       • category = cache.find(            │
+│         type=GuildCategory && name=cat)   │
+│       │  non → migration : canal texte  │
+│       │  « cat » (bug) → renommé         │
+│       │  « [ancien] cat », puis          │
+│       │  create(type=GuildCategory)      │
 │       • channel  = cache.find(dateName)   │
 │         → absent : guild.channels.create  │
 │         │  (GuildText, parentId=cat,      │
@@ -174,9 +177,10 @@ Surface : 4 tests, tous ciblant C1 (moteur calendrier). C2 n'est pas testé.
 │         → présent + parentId ≠ cat :      │
 │         │  guild.channels.edit(ch, {      │
 │         │    parent: category, reason })  │
-│         │  ← API v14 qui a remplacé     │
-│         │  channel.move() (supprimé)     │
+│         │  ← PATCH /channels/{id}+       │
+│         │     parent_id (gateway sync)   │
 │         → présent + parentId = cat : no-op│
+│   • garde-fou : type cible==GuildCategory│
 │   • erreur par date isolée (catch interne │
 │     au for) → 1 date cassée ≠ tout le for│
 └────────────────────────────────────────────┘
@@ -222,15 +226,19 @@ la même liste, au moment où ils s'exécutent.
                           │  categoryName = getCategoryNameForDate(date)    │
                           │  dateName     = formatDateChannelName(date)     │
                           ├─────────────────────────────────────────────────┤
-                          │  ① category ? ──non──► guild.channels.create(   │
-                          │                      { type: GUILD_CATEGORY })  │
+                          │  ① category ? ──oui──► utiliser (type=        │
+                          │                      GuildCategory)            │
+                          │     └ non → migration : canal texte « cat »  │
+                          │       (bug) → renommé « [ancien] cat »,       │
+                          │       puis create({ type: GuildCategory })    │
                           │  ② channel  ? ──non──► guild.channels.create(   │
                           │                      { type: GuildText,         │
                           │                        parentId: category.id,   │
                           │                        overwrites: everyone:     │
                           │                        ViewChannel + SendMessages│
                           │                      })   → createdCount++      │
-                          │  ③ channel ? oui ──► parentId ≠ category.id ?   │
+                          │  ③ channel ? oui ──► parentId ≠ category.id ?  │
+                          │     (garde-fou type cible==GuildCategory)     │
                           │                        → guild.channels.edit(   │
                           │                           ch, { parent: category,│
                           │                             reason: « Réorg.   │
@@ -318,7 +326,45 @@ globales (et `npm run register` après un démarrage écrasait
 
 Résultat : 1 contrat + 1 liste + 2 entry points identiques (voir §3.M3, §2.C3).
 
-### 6.2 Deux clients Discord API (consolidation partiellement faite)
+### 6.2 ✅ Résolu (18/10/2026) : catégories créées en CANAL TEXTE — constante
+`GUILD_CATEGORY` undefined
+
+**Symptom** : le bot créait bien les « catégories » `Les DIMANCHE/LUNDI LBJ
+<année>` et les salons texte `novembre-30`…, mais le déplacement échouait
+avec :
+```
+DiscordAPIError[50035]: Invalid Form Body
+parent_id[CHANNEL_PARENT_INVALID_TYPE]: Not a category
+requestBody.parent_id: '1561708…'
+```
+
+**Cause racine** : dans **discord.js 14.27.0** (basé sur
+`discord-api-types/v10`), les constantes `ChannelType` sont en
+**PascalCase** :
+- `ChannelType.GuildText = 0`
+- `ChannelType.GuildCategory = 4`
+- `ChannelType.GUILD_CATEGORY = undefined` (nom MAJUSCULES inexistant)
+
+Le code utilisait `ChannelType.GUILD_CATEGORY` → `undefined` :
+- `guild.channels.create({ type: undefined })` → Discord crée un **canal
+texte par défaut**, **pas** une catégorie.
+- `cache.find(ch => ch.type === ChannelType.GUILD_CATEGORY)` → `=== undefined`
+  → **toujours faux** → la « catégorie » n'est jamais retrouvée.
+- `guild.channels.edit(salon, { parent: <canal texte> })` → Discord rejette :
+  **`parent_id : Not a category`**.
+
+**Fix appliqué** (app.js, branche `create_channel`) :
+- `ChannelType.GUILD_CATEGORY` → **`ChannelType.GuildCategory`** (4) pour le
+  `find` **et** le `create`.
+- **Migration** : si aucune vraie catégorie mais qu'un **canal texte** porte le
+  nom de la catégorie (débris du bug) → le bot le **renomme** en
+  `[ancien] <nom>` (suffixe unique si collision), puis crée la **vraie**
+  catégorie. Renommage (pas suppression) → **aucune perte de données**.
+- **Garde-fou** : avant tout déplacement, vérifier
+  `category?.type === ChannelType.GuildCategory` (log + `continue` sinon).
+- Logs détaillés (ids, types) sur création/déplacement/erreur (diagnostic).
+
+### 6.3 Deux clients Discord API (consolidation partiellement faite)
 
 Après le fix §6.1, l'inscription des commandes passe par un **seul** client
 (`utils.DiscordRequest`, fetch brut, User-Agent custom). Le REST de discord.js
@@ -328,7 +374,7 @@ Résidu : `DiscordRequest` n'est utilisé que pour l'inscription des commandes.
 discord.js (retries, auth intégrés) et supprimer `DiscordRequest` +
 `capitalize`.
 
-### 6.3 Code et config morts
+### 6.4 Code et config morts
 
 | Élément | Statut |
 |---|---|
@@ -337,7 +383,7 @@ discord.js (retries, auth intégrés) et supprimer `DiscordRequest` +
 | `/test` (global) | Enregistré au runtime et par `register.js` (fix §6.1) |
 | `npm run register` | Sûr : bulk overwrite de la même liste que le runtime — utile sans démarrer le bot |
 
-### 6.4 Robustesse du runtime
+### 6.5 Robustesse du runtime
 
 - **Pas de null-check sur `interaction.guild`** : `/create_channel` est global
   (pas de restriction d'intégration dans le PUT de `clientReady`) → utilisable
@@ -431,5 +477,9 @@ tests/
 - (fix §6.1, 18/10) — **Source unique des commandes** : `commands.js` exporte
   `ALL_COMMANDS` ; nouveau `register.js` ; `clientReady` et `npm run register`
   enregistrent la même liste.
+- (fix §6.2, 18/10) — **Catégories réellement créées** :
+  `ChannelType.GUILD_CATEGORY` (undefined) → `ChannelType.GuildCategory` (4) ;
+  migration (renommage `[ancien] <cat>` + création de la vraie catégorie) ;
+  garde-fou type/id + logs détaillés avant déplacement.
 - Machine du bot (Ubuntu, `/home/ubuntu/botCoqAlphaLBJ`) : installation
   `npm@12.2.0` globale (OOM résolé, 2 GiB RAM).

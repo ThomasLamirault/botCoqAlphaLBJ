@@ -51,16 +51,52 @@ client.on('interactionCreate', async interaction => {
 
         // Catégorie du jour : « Les DIMANCHE LBJ <année> » ou « Les LUNDI LBJ <année> »
         // (l'année suit le salon : 2026 ou 2027 selon le mois)
+        // NB : dans discord.js 14.27.0 (discord-api-types/v10), les constantes
+        // ChannelType sont en PascalCase → ChannelType.GuildCategory (4) pour
+        // une vraie catégorie. (ChannelType.GUILD_CATEGORY = undefined.)
         let category = guild.channels.cache.find(
-          ch => ch.type === ChannelType.GUILD_CATEGORY && ch.name === categoryName
+          ch => ch.type === ChannelType.GuildCategory && ch.name === categoryName
         );
+
+        // [migration] Les exécutions antérieures (bug ChannelType.GUILD_CATEGORY
+        // = undefined → type par défaut = texte) ont créé des CANAUX TEXTE
+        // nommés « Les DIMANCHE/LUNDI LBJ <année> » au lieu de vraies catégories.
+        // On les renomme pour libérer le nom et éviter toute confusion.
+        if (!category) {
+          const fake = guild.channels.cache.find(
+            ch => ch.type === ChannelType.GuildText && ch.name === categoryName
+          );
+          if (fake) {
+            let newName = `[ancien] ${categoryName}`;
+            let suffix = 2;
+            while (guild.channels.cache.find(c => c.name === newName)) {
+              newName = `[ancien] ${categoryName} ${suffix}`;
+              suffix++;
+            }
+            try {
+              await guild.channels.edit(fake, {
+                name: newName,
+                reason: `Migration bot : ancien canal texte créé par le bug, renommé en « ${newName} »`,
+              });
+              console.log(`[migration] Renommé « ${categoryName} » (canal texte, bug) → « ${newName} » [id=${fake.id}]`);
+            } catch (err) {
+              console.warn(`[migration] Impossible de renommer « ${categoryName} » :`, err.message ?? err);
+            }
+          }
+        }
+
+        // Crée la vraie catégorie si elle n'existe pas encore.
         if (!category) {
           try {
-            category = await guild.channels.create({ name: categoryName, type: ChannelType.GUILD_CATEGORY });
+            category = await guild.channels.create({
+              name: categoryName,
+              type: ChannelType.GuildCategory,
+            });
           } catch (err) {
             console.error(`Impossible de créer la catégorie « ${categoryName} » :`, err);
             continue;
           }
+          console.log(`Créée catégorie « ${categoryName} » [id=${category.id}]`);
         }
 
         // Salon du jour, dans la catégorie
@@ -68,7 +104,7 @@ client.on('interactionCreate', async interaction => {
 
         if (!channelExists) {
           try {
-            await guild.channels.create({
+            const newChan = await guild.channels.create({
               name: dateName,
               type: ChannelType.GuildText,
               parentId: category.id,
@@ -80,6 +116,7 @@ client.on('interactionCreate', async interaction => {
               ],
             });
             createdCount++;
+            console.log(`Créé « ${dateName} » [id=${newChan.id}] sous « ${categoryName} » [id=${category.id}]`);
           } catch (err) {
             console.error(`Impossible de créer ${dateName}:`, err);
           }
@@ -87,14 +124,30 @@ client.on('interactionCreate', async interaction => {
           // Salon déjà existant mais hors de sa catégorie : le réorganiser.
           // discord.js v14 a supprimé channel.move() → on utilise
           // guild.channels.edit() (qui passe par PATCH /channels/{id} avec parent_id).
+          // Garde-fou : ne déplace que si la cible est bien une vraie catégorie.
+          if (category?.type !== ChannelType.GuildCategory) {
+            console.error(`[déplacement] « ${dateName} » : cible non valide, type=${category?.type ?? 'undefined'}, id=${category?.id ?? 'null'}`);
+            continue;
+          }
           try {
             await guild.channels.edit(channelExists, {
               parent: category,
               reason: `Réorganisation de « ${dateName} » dans « ${categoryName} »`,
             });
             movedCount++;
+            console.log(`Déplacé « ${dateName} » [id=${channelExists.id}] → « ${categoryName} » [id=${category.id}]`);
           } catch (err) {
-            console.error(`Impossible de déplacer ${dateName} dans « ${categoryName} » :`, err);
+            console.error(
+              `Impossible de déplacer « ${dateName} » dans « ${categoryName} » :`,
+              {
+                categoryId: category?.id,
+                categoryType: category?.type,
+                channelId: channelExists?.id,
+                channelType: channelExists?.type,
+                channelParentId: channelExists?.parentId,
+              },
+              err,
+            );
           }
         }
       }
