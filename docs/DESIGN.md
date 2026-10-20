@@ -2,8 +2,8 @@
 
 > **Méthode** : découpage en modules profonds (seams, interfaces minces, implementation riche).
 > **Source de vérité** : cette documentation est générée à partir de l'état réel du code
-> (18/10/2026, post-fix « source unique des commandes » ; `npm i -g npm@12.2.0`
-> installé sur la machine du bot).
+> (fix « source unique des commandes », fix `ChannelType`, et ajout de la
+> commande `/archive` ; `npm i -g npm@12.2.0` installé sur la machine du bot).
 > Chaque section se base sur ce que le code fait **aujourd'hui**, pas sur ce qu'on aimerait.
 
 ---
@@ -17,6 +17,13 @@ du mois courant + du mois suivant, il existe :
 1. une **catégorie** `Les DIMANCHE LBJ <année>` / `Les LUNDI LBJ <année>`
 2. un **salon texte** `aout-4`, `octobre-12`, `janvier-4` … dans la bonne catégorie
 3. une permission par défaut : **tout le monde peut voir + envoyer**
+
+Un deuxième pilotage — **`/archive`** — consolide les salons **révolus**
+(mois précédent et plus anciens, à la date de l'appel) :
+1. déplacement de ces salons dans une catégorie **`archive`** (créée si absente) ;
+2. création d'un canal de **synthèse** par mois archivé : **`bilan-<mois>-<année>`**
+   (ex. `bilan-septembre-2026`), qui regroupe le **dernier message** de chaque
+   salon archivé.
 
 Exemple concret (exécuté le 18/10/2026) : salons `octobre-18` et `octobre-19`
 déplacés de `Les DIMANCHE LBJ 2025` → `Les DIMANCHE LBJ 2026`.
@@ -52,7 +59,7 @@ déplacés de `Les DIMANCHE LBJ 2025` → `Les DIMANCHE LBJ 2026`.
 ┌────────────────────────────────────────────────────────────┐
 │ commands.js — DÉFINITIONS (source unique)                  │
 │ • CREATE_CHANNEL_COMMAND, TEST_COMMAND                     │
-│ • export ALL_COMMANDS (2 commandes, même shape)            │
+│ • export ALL_COMMANDS (3 commandes, même shape)           │
 └────────────────────────────────────────────────────────────┘
 ┌────────────────────────────────────────────────────────────┐
 │ register.js — SCRIPT (npm run register)                    │
@@ -65,10 +72,10 @@ déplacés de `Les DIMANCHE LBJ 2025` → `Les DIMANCHE LBJ 2026`.
 | Fichier | Nature | Surface (exports / effets) |
 |---|---|---|
 | `app.js` | Runtime (1 seul) | 2 événements + `login()` ; le seul code avec effet réel côté Discord |
-| `utils.js` | Bibliothèque | 5 exports : `DiscordRequest`, `InstallGlobalCommands`, `getOpenDatesForCurrentAndNextMonth`, `formatDateChannelName`, `getCategoryNameForDate`, `capitalize` |
-| `commands.js` | Bibliothèque (définitions) | 1 export : `ALL_COMMANDS` (`/create_channel` + `/test`) |
+| `utils.js` | Bibliothèque | 9 exports : `DiscordRequest`, `InstallGlobalCommands`, `getOpenDatesForCurrentAndNextMonth`, `formatDateChannelName`, `getCategoryNameForDate`, `parseChannelDate`, `getBilanNameForDate`, `getMonthNameFr`, `capitalize` |
+| `commands.js` | Bibliothèque (définitions) | 1 export : `ALL_COMMANDS` (`/create_channel` + `/test` + `/archive`) |
 | `register.js` | Script standalone | 1 appel : `InstallGlobalCommands(APP_ID, ALL_COMMANDS)` |
-| `tests/utils.test.js` | vitest | 4 tests (tous sur `utils.js`) |
+| `tests/utils.test.js` | vitest | 8 tests (tous sur `utils.js`) |
 | `.env` | Configuration (gitignored) | `APP_ID`, `DISCORD_TOKEN`, `PUBLIC_KEY` |
 
 **Dépendances** : `discord.js@14.27.0` (cœur), `vitest` (tests), `nodemon` (dev), `dotenv` (env).
@@ -88,6 +95,9 @@ C'est ce que l'appelant (app.js) doit connaître — et rien d'autre :
 getOpenDatesForCurrentAndNextMonth(currentDate?: Date): Date[]
 formatDateChannelName(date: Date): string       // "aout-15"
 getCategoryNameForDate(date: Date): string      // "Les DIMANCHE LBJ 2026"
+parseChannelDate(channelName: string, now?: Date): Date | null // "sept-30" → Date (année déduite)
+getBilanNameForDate(date: Date): string          // "bilan-septembre-2026"
+getMonthNameFr(date: Date): string               // "septembre"
 ```
 
 L'implémentation est cachée (voir §3.M1). **C'est le module le plus réutilisable**
@@ -121,18 +131,21 @@ utilisée par deux points d'entrée qui enregistrent exactement la même liste :
 
 ### C5 — Tests (vitest)
 
-Surface : 4 tests, tous ciblant C1 (moteur calendrier). C2 n'est pas testé.
+Surface : 8 tests, tous ciblant C1 (moteur calendrier) — 4 sur les dates
+natives + 4 sur les utilitaires d'archivage (`parseChannelDate`,
+`getBilanNameForDate`, `getMonthNameFr`). C2 (cycle des salons) et le handler
+`/archive` ne sont pas testés en unit (couplage au `Client` et au REST).
 
 ---
 
 ## 3. Les Modules Profonds
 
-### M1 — Moteur calendrier (`utils.js`, L45–93)
+### M1 — Moteur calendrier (`utils.js`)
 
 ```
 ┌────────────────────────────────────────────┐
 │ SMALL INTERFACE                           │
-│   3 exports, chacun ≤ 1 paramètre (Date)  │
+│   6 exports, chacun ≤ 1 paramètre (Date)  │
 │   → Date[] / string                       │
 ├────────────────────────────────────────────┤
 │ DEEP IMPLEMENTATION                       │
@@ -198,8 +211,8 @@ Contrat : **bulk overwrite** des commandes globales de l'application Discord
 (PUT `applications/{id}/commands`).
 
 - **Définitions** : `ALL_COMMANDS` dans `commands.js` (seule source de vérité)
-  = `/create_channel` + `/test`, même shape (type 1, integration_types [0,1],
-  contexts [0,1,2]).
+  = `/create_channel` + `/test` + `/archive`, même shape (type 1,
+  integration_types [0,1], contexts [0,1,2]).
 - **Entry point runtime** : `app.js` `clientReady` →
   `InstallGlobalCommands(client.user.id, ALL_COMMANDS)`.
 - **Entry point script** : `register.js` (`npm run register`) →
@@ -207,6 +220,50 @@ Contrat : **bulk overwrite** des commandes globales de l'application Discord
 
 Plus d'écrasement croisé : les deux entry points enregistrent exactement
 la même liste, au moment où ils s'exécutent.
+
+### M4 — Archivage (`app.js`, interactionCreate, branche `archive`)
+
+```
+┌────────────────────────────────────────────────┐
+│ SMALL INTERFACE                               │
+│   interaction.chatInput /archive              │
+│   → 1 message récapitulatif                   │
+│     (« X salons archivés, sur N mois »)       │
+├────────────────────────────────────────────────┤
+│ DEEP IMPLEMENTATION                           │
+│   • deferReply() public (anti-timeout)        │
+│   • now = new Date()                          │
+│   • catégorie `archive` : cache.find          │
+│     (type=GuildCategory && name='archive')    │
+│     → non : create({ type: GuildCategory })   │
+│   • for salon of cache (text, non-bilan,     │
+│     non-archivé) :                            │
+│       nom = formatDateChannelName(salon.id)   │
+│       d = parseChannelDate(nom, now)          │
+│       date révolue ? (mois < mois de now)     │
+│         → déplacer : channels.edit(           │
+│             salon, { parent: archiveCat,      │
+│             reason: « archivage » })          │
+│         + dernier message de `salon.history`  │
+│   • pour chaque mois distinct archivé (croissant) :│
+│     bilanName = getBilanNameForDate(dernier)  │
+│     → absent : channels.create(               │
+│         GuildText, parentId=archiveCat,       │
+│         overwrites everyone:View+Send)        │
+│         + envoyer le message récapitulatif    │
+│     → présent : édit du canal avec le message│
+│       complet (regroupeur)                   │
+│   • isolation d'erreur par canal (try/catch)  │
+│     → 1 salon cassé ≠ toute l'exécution      │
+└────────────────────────────────────────────────┘
+```
+
+- **Leverage** : moyen. Fortement couplé aux objets `Guild` et aux effets REST
+  réels (lecture de l'historique, moves).
+- **Localité** : élevée. Toute la règle « quel salon est révolu, où le mettre,
+  quoi résumer » est concentrée ici — c'est le seul endroit à relire quand on
+  change la règle (ex. archiver 2 mois en arrière, format du message bilan).
+
 
 ---
 
@@ -261,13 +318,73 @@ la même liste, au moment où ils s'exécutent.
                           )
 ```
 
+## 4.1 Flux d'exécution — `/archive`
+
+```
+[user] ── /archive ──► [interactionCreate]
+                          │
+                          ▼
+                     deferReply()           ← public, évite le timeout 3s
+                          │
+                     now = new Date()
+                          │
+                     archiveCat = cache.find(
+                        type=GuildCategory && name='archive')
+                          │
+                          │ non → guild.channels.create({
+                          │   type: GuildCategory, name: 'archive' })
+                          │
+                     ┌────┴───────────────────────────────────────────────┐
+                     │ POUR CHAQUE SALON TEXTE (non-bilan, non-archivé)   │
+                     │ ① nom  = formatDateChannelName(salon.id)           │
+                     │ ② date = parseChannelDate(nom, now)                │
+                     │     → null (nom inconnu / « [ancien] ») → skip     │
+                     │ ③ date révolue ? (mois < mois de now)              │
+                     │     non → skip ; oui →                            │
+                     │ ④ channels.edit(salon, {                          │
+                     │       parent: archiveCat, reason: « archivage »})  │
+                     │ ⑤ dernier message :                                │
+                     │     salon.history.last() → messageRésumé           │
+                     │ ⑥ moisDistinct.add(date.getUTCMonth())             │
+                     │     + archivedCount++                               │
+                     │ ⑦ try/catch isolé par salon (1 casse ≠ tout)        │
+                     └─────────────────────────────────────────────────────┘
+                          │
+                     POUR chaque mois distinct archivé (ordre croissant) :
+                          │
+                     bilanName = getBilanNameForDate(dernierSalonDate)
+                          │
+                     cache.find(name = bilanName)
+                          │
+                     ┌─────┴──────────────────────────────────────────────┐
+                     │ absent → channels.create({ type: GuildText,         │
+                     │   parentId: archiveCat,                            │
+                     │   overwrites everyone: View+Send })                │
+                     │   + envoyer `Synthèse ${getMonthNameFr(date)}`      │
+                     │     + dernier message d'un salon (regroupeur)      │
+                     │   → bilansCréés++                                   │
+                     │                                                     │
+                     │ présent → channels.edit(bilan, { messages:         │
+                     │   [message récapitulatif du mois] })               │
+                     │   (mise à jour du contenu de la synthèse)         │
+                     │                                                     │
+                     │ try/catch isolé par mois                            │
+                     └─────────────────────────────────────────────────────┘
+                          │
+                          ▼
+                     editReply(
+                       `📦 ${archivedCount} salon(s) révolus → archive\n` +
+                       `${bilanCount} bilan(s) créé(s) sur ${nMois} mois`
+                     )
+```
+
 ---
 
 ## 5. Testabilité — état actuel et préparation au TDD
 
-### Ce qui est déjà testé (4/4, `tests/utils.test.js`)
+### Ce qui est déjà testé (8/8, `tests/utils.test.js`)
 
-Tout le **Moteur calendrier (C1/M1)** :
+Tout le **Moteur calendrier (C1/M1)**, dont les utilitaires d'archivage :
 
 | Test | Cible |
 |---|---|
@@ -275,13 +392,19 @@ Tout le **Moteur calendrier (C1/M1)** :
 | Passage d'année (15/12/2026 → 17 dates, déc 2026 + janv 2027) | `getOpenDatesForCurrentAndNextMonth` |
 | Nommage catégorie (DIMANCHE/LUNDI + année du salon) | `getCategoryNameForDate` |
 | Nommage salon (suppression d'accents : `aout-15`, `fevrier-1`) | `formatDateChannelName` |
+| Parsing « mois-jour » → Date (année déduite, dim/lun) | `parseChannelDate` |
+| Parsing invalide → null (jour inexistant, nom inconnu, `[ancien]`) | `parseChannelDate` |
+| Nommage canal bilan (`bilan-septembre-2026`, sans accent) | `getBilanNameForDate` |
+| Nom du mois avec accents (pour le contenu) | `getMonthNameFr` |
 
 ✅ Règle d'or déjà respectée : **injection par défaut** (`currentDate = new Date()`).
 
 ### Ce qui n'est pas testé
 
-**M2 — cycle de vie des salons** : couplé au `Client`, au cache `guild.channels`,
-aux appels REST réels. Impossible de tester en unit sans extraction.
+**M2 — cycle de vie des salons** et le **handler `/archive` (M4)** :
+couplés au `Client`, au cache `guild.channels`, à `salon.history`
+(lecture de l'historique Discord) et aux appels REST réels. Impossible de
+tester en unit sans extraction (voir §5, préparation au TDD).
 
 ### Préparation au TDD (règles d'or de la phase 3)
 
@@ -394,6 +517,12 @@ discord.js (retries, auth intégrés) et supprimer `DiscordRequest` +
 - **`npm start` sans `npm install`** : le premier `npm install` a **Killed** (OOM)
   sur la machine du bot (2 GiB RAM, 0 swap) — résolu en installant `npm@12.2.0`
   globalement ; à re-documenter pour les setups.
+- **`salon.history` vide possible (handler `/archive`)** : `salon.history`
+  est le **cache local des messages** ; sans message pré-chargé (pas d'intent
+  `GuildMessages` / `fetch` préalable), `.last()` peut retourner `undefined`
+  → le canal de bilan recevra un message vide (« *Salon vide — pas de message
+  à archiver.* »). À améliorer : `await salon.history.fetch({ limit: 1 })`
+  avant de lire le dernier message (et/ou activer l'intent `GuildMessages`).
 
 ---
 
@@ -425,7 +554,7 @@ src/
 app.js                        → ~10 lignes : createClient() + register()
                                 + attachHandlers() + login()
 tests/
-├── calendar.test.ts          → les 4 tests existants (relocalisés)
+├── calendar.test.ts          → les 8 tests existants (relocalisés)
 ├── channels.test.ts          → TDD : FakeChannelManager, idempotence,
 │                               passage d'année, isolation d'erreur
 └── interactions.test.ts      → handlers testés avec mock Client
@@ -456,15 +585,15 @@ tests/
 |---|---|---|
 | `start` | `node app.js` | Runtime du bot |
 | `dev` | `nodemon app.js` | Runtime avec reload |
-| `register` | `node register.js` | Bulk overwrite des 2 commandes globales |
-| `test` | `vitest run` | 4 tests (M1) |
+| `register` | `node register.js` | Bulk overwrite des 3 commandes globales |
+| `test` | `vitest run` | 8 tests (M1 : dates + archivage) |
 
 ### C. Événements discord.js utilisés
 
 | Événement | Intent requis | Usage |
 |---|---|---|
 | `clientReady` | `Guilds` | Inscription commandes, `login` |
-| `interactionCreate` | `Guilds` | `/test`, `/create_channel` |
+| `interactionCreate` | `Guilds` | `/test`, `/create_channel`, `/archive` |
 | `channelUpdate` (implicite, via cache) | `Guilds` | Synchronisation du cache après `guild.channels.edit` (move REST) |
 
 ### D. Historique des fix majeurs
@@ -483,3 +612,10 @@ tests/
   garde-fou type/id + logs détaillés avant déplacement.
 - Machine du bot (Ubuntu, `/home/ubuntu/botCoqAlphaLBJ`) : installation
   `npm@12.2.0` globale (OOM résolé, 2 GiB RAM).
+- (ajout `/archive`, 18/10/2026) — **Consolidation des salons révolus** :
+  commande `/archive` (app.js, `commands.js`, `utils.js` : `parseChannelDate`,
+  `getBilanNameForDate`, `getMonthNameFr`). Déplace les salons `mois-jour`
+  dont le mois est antérieur au mois courant vers une catégorie `archive`,
+  et crée/met à jour un canal `bilan-<mois>-<année>` par mois archivé
+  (synthèse du dernier message de chaque salon). 4 tests ajoutés dans
+  `tests/utils.test.js`.

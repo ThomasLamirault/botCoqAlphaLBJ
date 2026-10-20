@@ -22,4 +22,12 @@ const TEST_COMMAND = {
   contexts: [0, 1, 2],
 };
 
-export const ALL_COMMANDS = [CREATE_CHANNEL_COMMAND, TEST_COMMAND];
+const ARCHIVE_COMMAND = {
+  name: 'archive',
+  description: 'Archiver les salons du mois précédent révolu et plus anciens dans une catégorie « archive », avec un canal de bilan par mois archivé',
+  type: 1,
+  integration_types: [0, 1],
+  contexts: [0, 1, 2],
+};
+
+export const ALL_COMMANDS = [CREATE_CHANNEL_COMMAND, TEST_COMMAND, ARCHIVE_COMMAND];

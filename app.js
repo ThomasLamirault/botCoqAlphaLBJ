@@ -5,6 +5,9 @@ import {
   formatDateChannelName,
   getCategoryNameForDate,
   InstallGlobalCommands,
+  parseChannelDate,
+  getBilanNameForDate,
+  getMonthNameFr,
 } from './utils.js';
 import { ALL_COMMANDS } from './commands.js';
 
@@ -22,7 +25,25 @@ client.once('clientReady', async () => {
   console.log(`✅ ${ALL_COMMANDS.length} commande(s) installée(s) globalement`);
 });
 
-// Étape 2 : Gestion des commandes (/create et /test)
+// Récupère le dernier (plus récent) message d'un canal de texte.
+// `channel.messages.fetch({ limit: 1, cache: false })` retourne une
+// Collection d'au plus un élément ; l'API Discord renvoie les messages du
+// plus récent au plus ancien, donc ce unique élément est le dernier message.
+async function getLastMessage(channel) {
+  try {
+    const messages = await channel.messages.fetch({ limit: 1, cache: false });
+    if (!messages.size) return null;
+    return messages.first();
+  } catch (err) {
+    console.warn(
+      `Impossible de lire le dernier message de « ${channel.name} » :`,
+      err.message ?? err,
+    );
+    return null;
+  }
+}
+
+// Étape 2 : Gestion des commandes (/create, /test, /archive)
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
@@ -161,6 +182,149 @@ client.on('interactionCreate', async interaction => {
         : 'ℹ️ Tous les salons existent déjà, et sont dans les bonnes catégories.';
         
       return await interaction.editReply({ content: message });
+    }
+
+    // --- Commande ARCHIVE (archivage des salons révolus) ---
+    if (interaction.commandName === 'archive') {
+      const guild = interaction.guild;
+      await interaction.deferReply();
+      const now = new Date();
+
+      const ARCHIVE_NAME = 'archive';
+      let archiveCategory = guild.channels.cache.find(
+        (ch) => ch.type === ChannelType.GuildCategory && ch.name === ARCHIVE_NAME,
+      );
+      if (!archiveCategory) {
+        try {
+          // On la positionne en bas de l'arborescence.
+          const lastPos = Math.max(
+            0,
+            ...(guild.channels.cache.map((c) => c.position)),
+          );
+          archiveCategory = await guild.channels.create({
+            name: ARCHIVE_NAME,
+            type: ChannelType.GuildCategory,
+            position: lastPos + 1,
+          });
+          console.log(`Créée catégorie « ${ARCHIVE_NAME} » [id=${archiveCategory.id}]`);
+        } catch (err) {
+          console.error(`Impossible de créer la catégorie « ${ARCHIVE_NAME} » :`, err);
+          return await interaction.editReply({
+            content: `❌ Impossible de créer la catégorie « ${ARCHIVE_NAME} » : ${err.message ?? err}`,
+          });
+        }
+      }
+
+      // Garde-fou : la cible doit être une vraie catégorie.
+      if (archiveCategory.type !== ChannelType.GuildCategory) {
+        return await interaction.editReply({
+          content: `❌ « ${ARCHIVE_NAME} » n'est pas une catégorie valide (type=${archiveCategory.type}).`,
+        });
+      }
+      const archiveId = archiveCategory.id;
+
+      // Dates ouvertes = mois courant + suivant (getOpenDatesForCurrentAndNextMonth).
+      // Tout salon dont (mois, jour) n'y figure pas est « révolu »
+      // (mois précédent révolu et plus anciens) → à archiver.
+      const activeDates = getOpenDatesForCurrentAndNextMonth(now);
+      const isActiveSlot = (m, d) =>
+        activeDates.some((a) => a.getMonth() === m && a.getDate() === d);
+
+      // Canaux texte hors « archive », dont le (mois, jour) est non ouvert.
+      const toArchive = [];
+      for (const ch of guild.channels.cache.values()) {
+        if (ch.type !== ChannelType.GuildText) continue;
+        if (ch.parentId === archiveId) continue; // déjà archivé
+        const date = parseChannelDate(ch.name, now);
+        if (!date) continue; // pas un salon du bot (nom non « mois-jour »)
+        if (isActiveSlot(date.getMonth(), date.getDate())) continue; // ouvert
+        toArchive.push({ channel: ch, date });
+      }
+
+      if (toArchive.length === 0) {
+        return await interaction.editReply({
+          content: '✅ Rien à archiver : tous les salons ouverts sont déjà en place.',
+        });
+      }
+
+      // Déplacer chaque salon dans « archive » + lire son dernier message.
+      let archivedCount = 0;
+      const groupsByBilan = new Map(); // nomBilan -> { date, entries: [] }
+      for (const { channel, date } of toArchive) {
+        const lastMessage = await getLastMessage(channel);
+        const bilanName = getBilanNameForDate(date);
+        try {
+          await guild.channels.edit(channel, {
+            parent: archiveCategory,
+            reason: `Archivage de « ${channel.name} » (${date.getMonth() + 1}/${date.getDate()} ${date.getFullYear()}) dans « ${ARCHIVE_NAME} »`,
+          });
+          archivedCount++;
+          console.log(
+            `Archivé « ${channel.name} » [id=${channel.id}] → « ${ARCHIVE_NAME} » [id=${archiveId}]`,
+          );
+        } catch (err) {
+          console.error(`Impossible d'archiver « ${channel.name} » :`, err);
+          continue; // canal non déplacé : on ne le met pas dans le bilan
+        }
+        if (groupsByBilan.has(bilanName)) {
+          groupsByBilan.get(bilanName).entries.push({ channel, date, lastMessage });
+        } else {
+          groupsByBilan.set(bilanName, { date, entries: [{ channel, date, lastMessage }] });
+        }
+      }
+
+      // Un canal de synthèse par (mois, année) : bilan-<mois>-<année>.
+      const SNIP = 500;
+      const cleanMsg = (s) => {
+        const t = (s || '(message vide)').replace(/https?:\/\/?\S+/g, '[lien]');
+        return t.replace(/\r?\n/g, ' ').trim().slice(0, SNIP);
+      };
+      let bilansPublies = 0;
+      for (const [bilanName, group] of groupsByBilan.entries()) {
+        const existing = guild.channels.cache.find(
+          (ch) =>
+            ch.type === ChannelType.GuildText &&
+            ch.name === bilanName &&
+            ch.parentId === archiveId,
+        );
+        let bilanChannel = existing;
+        if (!bilanChannel) {
+          try {
+            bilanChannel = await guild.channels.create({
+              name: bilanName,
+              type: ChannelType.GuildText,
+              parentId: archiveId,
+            });
+            console.log(`Créé canal de bilan « ${bilanName} » [id=${bilanChannel.id}]`);
+          } catch (err) {
+            console.error(`Impossible de créer le canal de bilan « ${bilanName} » :`, err);
+            continue;
+          }
+        }
+        const lines = group.entries.map(
+          (e) => `• ${e.channel.name} → ${cleanMsg(e.lastMessage?.content)}`,
+        );
+        const body = [
+          `📊 **Bilan des salons archivés — ${getMonthNameFr(group.date)} ${group.date.getFullYear()}**`,
+          `(_${group.entries.length} salon(s) archivé(s) _)`,
+          '',
+          ...lines,
+        ].join('\n');
+        try {
+          await bilanChannel.send(body);
+          bilansPublies++;
+          console.log(`Bilan publié dans « ${bilanName} » [id=${bilanChannel.id}]`);
+        } catch (err) {
+          console.error(`Impossible de publier le bilan « ${bilanName} » :`, err);
+        }
+      }
+
+      const summary = [
+        `✅ Archivage terminé :`,
+        `• **${archivedCount}** salon(s) déplacé(s) dans « ${ARCHIVE_NAME} »`,
+        `• **${bilansPublies}** canal(s) de bilan ${bilansPublies === 1 ? 'publié' : 'publiés'}`,
+      ].join('\n');
+      return await interaction.editReply({ content: summary });
     }
 
   } catch (error) {

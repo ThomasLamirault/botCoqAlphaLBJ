@@ -38,6 +38,12 @@ export async function InstallGlobalCommands(appId, commands) {
 
 const MONTHS_FR =  ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
 
+// Mois sans accents : correspond à la façon dont les canaux sont nommés
+// par formatDateChannelName (ex : « aout-15 », « decembre-3 »).
+const MONTHS_FR_NO_ACCENT = MONTHS_FR.map(
+  (name) => name.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase(),
+);
+
 /**
  * Retourne les objets Date des dimanches (0) et des lunis (1)
  * du mois courant + du mois suivant.
@@ -80,6 +86,74 @@ export function formatDateChannelName(date) {
 export function getCategoryNameForDate(date) {
   const dayLabel = date.getDay() === 0 ? 'DIMANCHE' : 'LUNDI';
   return `Les ${dayLabel} LBJ ${date.getFullYear()}`;
+}
+
+/**
+ * Parse le nom d'un canal de salon (ex : « septembre-30 », « novembre-1 »)
+ * en une Date, en déduisant l'année.
+ *
+ * Le nom ne contient pas l'année : elle est retrouvée comme la plus récente
+ * (<= l'année de `now`) dans laquelle ce (mois, jour) tombait un dimanche ou
+ * un lundi — c'est-à-dire l'année dans laquelle le canal a pu être créé par
+ * le bot. (Un même (mois, jour) ne tombe pas deux fois de suite sur dim/lun,
+ * donc cette année est unique sur une fenêtre raisonnable.)
+ *
+ * @param {string} channelName Nom du canal (ex : « septembre-30 »)
+ * @param {Date} now Date de référence
+ * @returns {Date|null} Date correspondante, ou null si le nom ne correspond
+ *   pas à un salon du bot.
+ */
+export function parseChannelDate(channelName, now) {
+  if (typeof channelName !== 'string') return null;
+
+  const parts = channelName.split('-');
+  if (parts.length !== 2) return null;
+
+  const monthPart = parts[0];
+  const day = parseInt(parts[1], 10);
+  if (Number.isNaN(day) || day < 1 || day > 31) return null;
+
+  const monthIndex = MONTHS_FR_NO_ACCENT.indexOf(monthPart);
+  if (monthIndex === -1) return null;
+
+  const yearNow = now.getFullYear();
+  for (let y = yearNow; y >= yearNow - 10; y--) {
+    const d = new Date(y, monthIndex, day);
+    // Écarte les dates inexistantes (ex : « 31 février »).
+    if (d.getFullYear() !== y || d.getMonth() !== monthIndex || d.getDate() !== day) {
+      continue;
+    }
+    // 0 = dimanche, 1 = lundi → jours ouverts du club.
+    if (d.getDay() === 0 || d.getDay() === 1) return d;
+  }
+
+  return null;
+}
+
+/**
+ * Nom du canal de synthèse pour une date : « bilan-<mois sans accent>-<année> ».
+ * Ex : `bilan-septembre-2026`, `bilan-aout-2025`, `bilan-decembre-2026`.
+ *
+ * @param {Date} date Date du salon archivé
+ * @returns {string} Nom du canal de bilan
+ */
+export function getBilanNameForDate(date) {
+  const monthNoAccent = MONTHS_FR[date.getMonth()]
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase();
+  return `bilan-${monthNoAccent}-${date.getFullYear()}`;
+}
+
+/**
+ * Nom du mois en français (avec accents), pour un usage dans le contenu
+ * (ex : le message du bilan). Distinct du nom sans accent utilisé pour le canal.
+ *
+ * @param {Date} date
+ * @returns {string}
+ */
+export function getMonthNameFr(date) {
+  return MONTHS_FR[date.getMonth()];
 }
 
 export function capitalize(str) {
