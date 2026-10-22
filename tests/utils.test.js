@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   getOpenDatesForCurrentAndNextMonth,
   getCategoryNameForDate,
@@ -6,7 +6,9 @@ import {
   parseChannelDate,
   getBilanNameForDate,
   getMonthNameFr,
+  InstallGlobalCommands,
 } from '../utils.js';
+import { ALL_COMMANDS } from '../commands.js';
 
 describe('Tests utilitaires', () => {
   // Test de la logique de dates (création des channels)
@@ -101,4 +103,37 @@ describe('Tests utilitaires', () => {
     expect(getMonthNameFr(new Date(2027, 0, 3))).toBe('janvier');
   });
 
+  // ─── Tests de l'inscription des commandes (npm run register) ────────────────
+
+  it('doit refuser une description > 100 caractères (limite Discord, 400 50035)', async () => {
+    const bad = [
+      { name: 'test', description: 'ok', type: 1, integration_types: [0, 1], contexts: [0, 1, 2] },
+      { name: 'archive', description: 'x'.repeat(101), type: 1, integration_types: [0, 1], contexts: [0, 1, 2] },
+    ];
+    await expect(InstallGlobalCommands('1234567890', bad)).rejects.toThrow(
+      /description trop longue \(101 > 100\)/
+    );
+  });
+
+  it('doit refuser un nom de commande > 32 caractères', async () => {
+    const bad = [
+      { name: 'a'.repeat(33), description: 'ok', type: 1, integration_types: [0, 1], contexts: [0, 1, 2] },
+    ];
+    await expect(InstallGlobalCommands('1234567890', bad)).rejects.toThrow(
+      /name trop long \(33 > 32\)/
+    );
+  });
+
+  it('doit envoyer le bulk overwrite quand les commandes sont valides (fetch intercepté)', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      await InstallGlobalCommands('1234567890', ALL_COMMANDS);
+      const [url, opts] = fetchMock.mock.calls[0];
+      expect(url).toBe('https://discord.com/api/v10/applications/1234567890/commands');
+      expect(opts.method).toBe('PUT');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

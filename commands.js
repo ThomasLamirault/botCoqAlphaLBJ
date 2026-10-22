@@ -24,7 +24,7 @@ const TEST_COMMAND = {
 
 const ARCHIVE_COMMAND = {
   name: 'archive',
-  description: 'Archiver les salons du mois précédent révolu et plus anciens dans une catégorie « archive », avec un canal de bilan par mois archivé',
+  description: 'Archiver les salons révolus dans la catégorie « archive » + canal de bilan mensuel',
   type: 1,
   integration_types: [0, 1],
   contexts: [0, 1, 2],

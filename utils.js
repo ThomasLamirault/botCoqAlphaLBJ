@@ -17,8 +17,7 @@ export async function DiscordRequest(endpoint, options) {
   // throw API errors
   if (!res.ok) {
     const data = await res.json();
-    console.log(res.status);
-    throw new Error(JSON.stringify(data));
+    throw new Error(`Discord API ${res.status}: ${JSON.stringify(data)}`);
   }
   // return original response
   return res;
@@ -28,12 +27,24 @@ export async function InstallGlobalCommands(appId, commands) {
   // API endpoint to overwrite global commands
   const endpoint = `applications/${appId}/commands`;
 
-  try {
-    // This is calling the bulk overwrite endpoint: https://discord.com/developers/docs/interactions/application-commands#bulk-overwrite-global-application-commands
-    await DiscordRequest(endpoint, { method: 'PUT', body: commands });
-  } catch (err) {
-    console.error(err);
+  // Pré-validation des limites Discord : nom ≤ 32, description ≤ 100.
+  // Sinon, l'API renvoie un 400 opaque (code 50035, BASE_TYPE_MAX_LENGTH)
+  // qui ne précise pas laquelle des commandes est trop longue.
+  for (const [i, c] of commands.entries()) {
+    if (c.name.length > 32) {
+      throw new Error(
+        `commande[${i}] « ${c.name} » : name trop long (${c.name.length} > 32)`
+      );
+    }
+    if (c.description.length > 100) {
+      throw new Error(
+        `commande[${i}] « ${c.name} » : description trop longue (${c.description.length} > 100)`
+      );
+    }
   }
+
+  // This is calling the bulk overwrite endpoint: https://discord.com/developers/docs/interactions/application-commands#bulk-overwrite-global-application-commands
+  await DiscordRequest(endpoint, { method: 'PUT', body: commands });
 }
 
 const MONTHS_FR =  ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
