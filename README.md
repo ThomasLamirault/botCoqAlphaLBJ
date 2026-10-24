@@ -9,6 +9,7 @@ Le bot calcule automatiquement les dates d'ouverture du club pour le mois en cou
 - Création automatique des channels : `août-x`, `septembre-y`, etc.
 - Synchronisation hebdomadaire (Lundi & Dimanche).
 - Permission par défaut : Visible/Envoyer des messages pour tout le monde (#everyone).
+- **Archivage (`/archive`)** : déplace les salons révolus dans la catégorie `archive` et crée un canal `bilan-<mois>-<année>` par mois archivé (synthèse du dernier message de chaque salon).
 
 ## 🚀 Installation & Démarrage
 
@@ -38,7 +39,7 @@ Le bot a besoin de variables d'environnement pour s'authentifier. Créez un fich
 
 - **`app.js`** : Le cœur du-bot. Gère le cycle de vie, la configuration des channels et les événements Discord (`clientReady`, `interactionCreate`).
 - **`utils.js`** : Fonctions utilitaires pour la gestion des dates (`getOpenDays...`) et les requêtes API Discord.
-- **`commands.js`** : Déclaration (source unique) des commandes globales (`ALL_COMMANDS`) : `/test` + `/create_channel`.
+- **`commands.js`** : Déclaration (source unique) des commandes globales (`ALL_COMMANDS`) : `/create_channel`, `/test`, `/archive`.
 - **`register.js`** : Installation des commandes globales (`npm run register` — bulk overwrite).
 
 ## ⚡ Commandes Bot
@@ -47,6 +48,7 @@ Le bot a besoin de variables d'environnement pour s'authentifier. Créez un fich
 |----------|-------------|------------|
 | `/test` | Vérifie que le bot écoute bien les événements. | Tous |
 | `/create_channel` | Déclenche la génération des channels du mois. | Admin/Modérateur |
+| `/archive` | Déplace les salons révolus dans la catégorie `archive` + canal de bilan `bilan-<mois>-<année>` (dernier message par salon). | Admin/Modérateur |
 
 ---
 *Ce projet est sous licence MIT. Inspiré par [discord/getting-started] mais adapté pour l'usage local.*
