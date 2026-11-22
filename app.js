@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { Client, GatewayIntentBits, ChannelType } from 'discord.js';
+import { Client, GatewayIntentBits, ChannelType, PermissionFlagsBits } from 'discord.js';
 import {
   getOpenDatesForCurrentAndNextMonth,
   formatDateChannelName,
@@ -7,7 +7,7 @@ import {
   InstallGlobalCommands,
   parseChannelDate,
   getBilanNameForDate,
-  getMonthNameFr,
+  buildBilanMessages,
 } from './utils.js';
 import { ALL_COMMANDS } from './commands.js';
 
@@ -56,6 +56,18 @@ client.on('interactionCreate', async interaction => {
     // --- Commande CREATE_CHANNEL (Création des salons) ---
     if (interaction.commandName === 'create_channel') {
       const guild = interaction.guild;
+      if (!guild) {
+        return await interaction.reply({
+          content: '❌ Cette commande doit être utilisée dans un serveur.',
+          flags: 64,
+        });
+      }
+      if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)) {
+        return await interaction.reply({
+          content: '❌ Permission requise : gérer les salons (Administrateur ou Modérateur).',
+          flags: 64,
+        });
+      }
       
       // 1. Récupérer les dates (dimanche/lundi) du mois courant et suivant
       const datesToCreate = getOpenDatesForCurrentAndNextMonth();
@@ -178,7 +190,7 @@ client.on('interactionCreate', async interaction => {
       if (createdCount > 0) parts.push(`**${createdCount}** nouveau(s) salon(s) créé(s)`);
       if (movedCount > 0) parts.push(`**${movedCount}** salon(s) déplacé(s) dans la bonne catégorie`);
       const message = parts.length
-        ? `✅ ${parts.join(' et')} !`
+        ? `✅ ${parts.join(' et ')} !`
         : 'ℹ️ Tous les salons existent déjà, et sont dans les bonnes catégories.';
         
       return await interaction.editReply({ content: message });
@@ -187,6 +199,18 @@ client.on('interactionCreate', async interaction => {
     // --- Commande ARCHIVE (archivage des salons révolus) ---
     if (interaction.commandName === 'archive') {
       const guild = interaction.guild;
+      if (!guild) {
+        return await interaction.reply({
+          content: '❌ Cette commande doit être utilisée dans un serveur.',
+          flags: 64,
+        });
+      }
+      if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)) {
+        return await interaction.reply({
+          content: '❌ Permission requise : gérer les salons (Administrateur ou Modérateur).',
+          flags: 64,
+        });
+      }
       await interaction.deferReply();
       const now = new Date();
 
@@ -224,20 +248,25 @@ client.on('interactionCreate', async interaction => {
       const archiveId = archiveCategory.id;
 
       // Dates ouvertes = mois courant + suivant (getOpenDatesForCurrentAndNextMonth).
-      // Tout salon dont (mois, jour) n'y figure pas est « révolu »
+      // Tout salon dont (année, mois, jour) n'y figure pas est « révolu »
       // (mois précédent révolu et plus anciens) → à archiver.
       const activeDates = getOpenDatesForCurrentAndNextMonth(now);
-      const isActiveSlot = (m, d) =>
-        activeDates.some((a) => a.getMonth() === m && a.getDate() === d);
+      const isActiveSlot = (date) =>
+        activeDates.some(
+          (a) =>
+            a.getFullYear() === date.getFullYear() &&
+            a.getMonth() === date.getMonth() &&
+            a.getDate() === date.getDate(),
+        );
 
-      // Canaux texte hors « archive », dont le (mois, jour) est non ouvert.
+      // Canaux texte hors « archive », dont la date n'est plus dans la fenêtre active.
       const toArchive = [];
       for (const ch of guild.channels.cache.values()) {
         if (ch.type !== ChannelType.GuildText) continue;
         if (ch.parentId === archiveId) continue; // déjà archivé
         const date = parseChannelDate(ch.name, now);
         if (!date) continue; // pas un salon du bot (nom non « mois-jour »)
-        if (isActiveSlot(date.getMonth(), date.getDate())) continue; // ouvert
+        if (isActiveSlot(date)) continue; // ouvert
         toArchive.push({ channel: ch, date });
       }
 
@@ -274,11 +303,6 @@ client.on('interactionCreate', async interaction => {
       }
 
       // Un canal de synthèse par (mois, année) : bilan-<mois>-<année>.
-      const SNIP = 500;
-      const cleanMsg = (s) => {
-        const t = (s || '(message vide)').replace(/https?:\/\/?\S+/g, '[lien]');
-        return t.replace(/\r?\n/g, ' ').trim().slice(0, SNIP);
-      };
       let bilansPublies = 0;
       for (const [bilanName, group] of groupsByBilan.entries()) {
         const existing = guild.channels.cache.find(
@@ -301,19 +325,21 @@ client.on('interactionCreate', async interaction => {
             continue;
           }
         }
-        const lines = group.entries.map(
-          (e) => `• ${e.channel.name} → ${cleanMsg(e.lastMessage?.content)}`,
+        const messages = buildBilanMessages(
+          group.date,
+          group.entries.map((e) => ({
+            channelName: e.channel.name,
+            content: e.lastMessage?.content,
+            hasAttachments: (e.lastMessage?.attachments?.size ?? 0) > 0,
+            hasEmbeds: (e.lastMessage?.embeds?.length ?? 0) > 0,
+          })),
         );
-        const body = [
-          `📊 **Bilan des salons archivés — ${getMonthNameFr(group.date)} ${group.date.getFullYear()}**`,
-          `(_${group.entries.length} salon(s) archivé(s) _)`,
-          '',
-          ...lines,
-        ].join('\n');
         try {
-          await bilanChannel.send(body);
+          for (const body of messages) {
+            await bilanChannel.send(body);
+          }
           bilansPublies++;
-          console.log(`Bilan publié dans « ${bilanName} » [id=${bilanChannel.id}]`);
+          console.log(`Bilan publié dans « ${bilanName} » [id=${bilanChannel.id}] (${messages.length} message(s))`);
         } catch (err) {
           console.error(`Impossible de publier le bilan « ${bilanName} » :`, err);
         }
@@ -329,8 +355,14 @@ client.on('interactionCreate', async interaction => {
 
   } catch (error) {
     console.error(error);
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: '❌ Une erreur interne est survenue.', flags: 64 });
+    try {
+      if (interaction.deferred && !interaction.replied) {
+        await interaction.editReply({ content: '❌ Une erreur interne est survenue.' });
+      } else if (!interaction.replied) {
+        await interaction.reply({ content: '❌ Une erreur interne est survenue.', flags: 64 });
+      }
+    } catch (replyErr) {
+      console.error('Impossible de répondre à l\'interaction en erreur :', replyErr);
     }
   }
 });

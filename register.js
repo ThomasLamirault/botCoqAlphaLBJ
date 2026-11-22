@@ -5,10 +5,8 @@ import { InstallGlobalCommands } from './utils.js';
 // Script `npm run register` : enregistre TOUTES les commandes globales
 // (bulk overwrite, sans avoir à démarrer le bot).
 // Liste unique : ALL_COMMANDS (commands.js).
-let inscrit = false;
 try {
   await InstallGlobalCommands(process.env.APP_ID, ALL_COMMANDS);
-  inscrit = true;
 } catch (err) {
   console.error(`❌ Inscription des commandes impossible : ${err.message}`);
   process.exit(1);

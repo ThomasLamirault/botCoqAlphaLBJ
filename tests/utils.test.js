@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { PermissionFlagsBits } from 'discord.js';
 import {
   getOpenDatesForCurrentAndNextMonth,
   getCategoryNameForDate,
@@ -6,6 +7,7 @@ import {
   parseChannelDate,
   getBilanNameForDate,
   getMonthNameFr,
+  buildBilanMessages,
   InstallGlobalCommands,
 } from '../utils.js';
 import { ALL_COMMANDS } from '../commands.js';
@@ -87,6 +89,60 @@ describe('Tests utilitaires', () => {
     expect(parseChannelDate('fevrier-30', now)).toBeNull();
     // canal déjà archivé (préfixe [ancien])
     expect(parseChannelDate('[ancien] Les DIMANCHE LBJ 2026', now)).toBeNull();
+    // suffixe non numérique
+    expect(parseChannelDate('janvier-15a', now)).toBeNull();
+  });
+
+  it('doit accepter un appel à parseChannelDate sans paramètre now (valeur par défaut)', () => {
+    const d = parseChannelDate('septembre-30');
+    expect(d).toBeInstanceOf(Date);
+    expect([0, 1]).toContain(d.getDay());
+  });
+
+  it('ne doit pas déduire une année future hors fenêtre lors du passage d\'année', () => {
+    // En janvier 2027, « decembre-6 » correspond au 6 déc. 2026 (dimanche),
+    // pas au 6 déc. 2027 (lundi, 11 mois dans le futur).
+    const dec = parseChannelDate('decembre-6', new Date(2027, 0, 15));
+    expect(dec).not.toBeNull();
+    expect(dec.getFullYear()).toBe(2026);
+    expect(dec.getMonth()).toBe(11);
+    expect(dec.getDate()).toBe(6);
+
+    // En décembre 2026, « janvier-4 » correspond bien au 4 janv. 2027 (mois suivant).
+    const jan = parseChannelDate('janvier-4', new Date(2026, 11, 15));
+    expect(jan).not.toBeNull();
+    expect(jan.getFullYear()).toBe(2027);
+    expect(jan.getMonth()).toBe(0);
+    expect(jan.getDate()).toBe(4);
+  });
+
+  it('doit formater les messages de bilan (liens, messages vides, pièces jointes)', () => {
+    const msgs = buildBilanMessages(new Date(2026, 8, 1), [
+      { channelName: 'septembre-6', content: 'Voir https://example.com/test\nsuper séance !' },
+      { channelName: 'septembre-7', content: '   \n  ' },
+      { channelName: 'septembre-13', content: '', hasAttachments: true },
+      { channelName: 'septembre-14', content: null, hasEmbeds: true },
+    ]);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toContain('septembre 2026');
+    expect(msgs[0]).toContain('• septembre-6 → Voir [lien] super séance !');
+    expect(msgs[0]).toContain('• septembre-7 → (message vide)');
+    expect(msgs[0]).toContain('• septembre-13 → (pièce jointe)');
+    expect(msgs[0]).toContain('• septembre-14 → (embed)');
+  });
+
+  it('doit découper un bilan trop long en plusieurs messages <= 2000 caractères', () => {
+    const entries = Array.from({ length: 8 }, (_, i) => ({
+      channelName: `septembre-${i + 1}`,
+      content: 'a'.repeat(500),
+    }));
+    const msgs = buildBilanMessages(new Date(2026, 8, 1), entries);
+    expect(msgs.length).toBeGreaterThan(1);
+    for (const msg of msgs) {
+      expect(msg.length).toBeLessThanOrEqual(2000);
+    }
+    expect(msgs.join('\n')).toContain('septembre-1');
+    expect(msgs.join('\n')).toContain('septembre-8');
   });
 
   it('doit produire le bon nom de canal de bilan (mois sans accent)', () => {
@@ -134,6 +190,16 @@ describe('Tests utilitaires', () => {
       expect(opts.method).toBe('PUT');
     } finally {
       vi.unstubAllGlobals();
+    }
+  });
+
+  it('doit restreindre /create_channel et /archive au serveur avec la permission ManageChannels', () => {
+    const restricted = ALL_COMMANDS.filter((c) => ['create_channel', 'archive'].includes(c.name));
+    expect(restricted).toHaveLength(2);
+    for (const cmd of restricted) {
+      expect(cmd.default_member_permissions).toBe(PermissionFlagsBits.ManageChannels.toString());
+      expect(cmd.contexts).toEqual([0]);
+      expect(cmd.integration_types).toEqual([0]);
     }
   });
 });

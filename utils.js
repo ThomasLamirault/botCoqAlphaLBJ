@@ -104,41 +104,95 @@ export function getCategoryNameForDate(date) {
  * en une Date, en déduisant l'année.
  *
  * Le nom ne contient pas l'année : elle est retrouvée comme la plus récente
- * (<= l'année de `now`) dans laquelle ce (mois, jour) tombait un dimanche ou
- * un lundi — c'est-à-dire l'année dans laquelle le canal a pu être créé par
- * le bot. (Un même (mois, jour) ne tombe pas deux fois de suite sur dim/lun,
- * donc cette année est unique sur une fenêtre raisonnable.)
+ * (<= fin du mois suivant par rapport à `now`) dans laquelle ce (mois, jour)
+ * tombait un dimanche ou un lundi — c'est-à-dire l'année dans laquelle le
+ * canal a pu être créé par le bot.
  *
  * @param {string} channelName Nom du canal (ex : « septembre-30 »)
- * @param {Date} now Date de référence
+ * @param {Date} [now=new Date()] Date de référence
  * @returns {Date|null} Date correspondante, ou null si le nom ne correspond
  *   pas à un salon du bot.
  */
-export function parseChannelDate(channelName, now) {
+export function parseChannelDate(channelName, now = new Date()) {
   if (typeof channelName !== 'string') return null;
 
   const parts = channelName.split('-');
   if (parts.length !== 2) return null;
 
   const monthPart = parts[0];
+  if (!/^\d{1,2}$/.test(parts[1])) return null;
   const day = parseInt(parts[1], 10);
-  if (Number.isNaN(day) || day < 1 || day > 31) return null;
+  if (day < 1 || day > 31) return null;
 
   const monthIndex = MONTHS_FR_NO_ACCENT.indexOf(monthPart);
   if (monthIndex === -1) return null;
 
-  const yearNow = now.getFullYear();
-  for (let y = yearNow; y >= yearNow - 10; y--) {
+  // Les salons créés par le bot couvrent au plus le mois courant + le mois suivant.
+  const maxDate = new Date(now.getFullYear(), now.getMonth() + 2, 0);
+  const startYear = maxDate.getFullYear();
+  for (let y = startYear; y >= startYear - 10; y--) {
     const d = new Date(y, monthIndex, day);
-    // Écarte les dates inexistantes (ex : « 31 février »).
+    // Écarte les dates inexistantes (ex : « 31 février ») et les dates au-delà du mois suivant.
     if (d.getFullYear() !== y || d.getMonth() !== monthIndex || d.getDate() !== day) {
       continue;
     }
+    if (d > maxDate) continue;
     // 0 = dimanche, 1 = lundi → jours ouverts du club.
     if (d.getDay() === 0 || d.getDay() === 1) return d;
   }
 
   return null;
+}
+
+/**
+ * Construit un ou plusieurs messages de bilan mensuel respectant la limite
+ * Discord de 2000 caractères par message.
+ *
+ * @param {Date} date Date représentative du mois archivé
+ * @param {Array<{ channelName: string, content?: string|null, hasAttachments?: boolean, hasEmbeds?: boolean }>} entries
+ * @param {number} [maxLength=2000] Longueur maximale d'un message Discord
+ * @returns {string[]} Liste des messages prêts à envoyer
+ */
+export function buildBilanMessages(date, entries, maxLength = 2000) {
+  const SNIP = 500;
+  const cleanMsg = (entry) => {
+    const cleaned = (entry.content ?? '')
+      .replace(/https?:\/\/\S+/g, '[lien]')
+      .replace(/\r?\n/g, ' ')
+      .trim()
+      .slice(0, SNIP);
+    if (cleaned) return cleaned;
+    if (entry.hasAttachments) return '(pièce jointe)';
+    if (entry.hasEmbeds) return '(embed)';
+    return '(message vide)';
+  };
+
+  const header = [
+    `📊 **Bilan des salons archivés — ${getMonthNameFr(date)} ${date.getFullYear()}**`,
+    `(_${entries.length} salon(s) archivé(s)_)`,
+    '',
+  ].join('\n');
+
+  const lines = entries.map((e) => {
+    const line = `• ${e.channelName} → ${cleanMsg(e)}`;
+    return line.length > maxLength ? `${line.slice(0, maxLength - 1)}…` : line;
+  });
+
+  const messages = [];
+  let current = header;
+  for (const line of lines) {
+    const sep = current.endsWith('\n') || current === '' ? '' : '\n';
+    if (current.length + sep.length + line.length > maxLength) {
+      messages.push(current.trimEnd());
+      current = line;
+    } else {
+      current += sep + line;
+    }
+  }
+  if (current.trim().length > 0) {
+    messages.push(current.trimEnd());
+  }
+  return messages;
 }
 
 /**

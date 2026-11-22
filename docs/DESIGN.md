@@ -72,10 +72,10 @@ déplacés de `Les DIMANCHE LBJ 2025` → `Les DIMANCHE LBJ 2026`.
 | Fichier | Nature | Surface (exports / effets) |
 |---|---|---|
 | `app.js` | Runtime (1 seul) | 2 événements + `login()` ; le seul code avec effet réel côté Discord |
-| `utils.js` | Bibliothèque | 9 exports : `DiscordRequest`, `InstallGlobalCommands`, `getOpenDatesForCurrentAndNextMonth`, `formatDateChannelName`, `getCategoryNameForDate`, `parseChannelDate`, `getBilanNameForDate`, `getMonthNameFr`, `capitalize` |
+| `utils.js` | Bibliothèque | 10 exports : `DiscordRequest`, `InstallGlobalCommands`, `getOpenDatesForCurrentAndNextMonth`, `formatDateChannelName`, `getCategoryNameForDate`, `parseChannelDate`, `getBilanNameForDate`, `getMonthNameFr`, `buildBilanMessages`, `capitalize` |
 | `commands.js` | Bibliothèque (définitions) | 1 export : `ALL_COMMANDS` (`/create_channel` + `/test` + `/archive`) |
 | `register.js` | Script standalone | 1 appel : `InstallGlobalCommands(APP_ID, ALL_COMMANDS)` |
-| `tests/utils.test.js` | vitest | 8 tests (tous sur `utils.js`) |
+| `tests/utils.test.js` | vitest | 16 tests (`utils.js` + `ALL_COMMANDS`) |
 | `.env` | Configuration (gitignored) | `APP_ID`, `DISCORD_TOKEN`, `PUBLIC_KEY` |
 
 **Dépendances** : `discord.js@14.27.0` (cœur), `vitest` (tests), `nodemon` (dev), `dotenv` (env).
@@ -95,9 +95,10 @@ C'est ce que l'appelant (app.js) doit connaître — et rien d'autre :
 getOpenDatesForCurrentAndNextMonth(currentDate?: Date): Date[]
 formatDateChannelName(date: Date): string       // "aout-15"
 getCategoryNameForDate(date: Date): string      // "Les DIMANCHE LBJ 2026"
-parseChannelDate(channelName: string, now?: Date): Date | null // "sept-30" → Date (année déduite)
+parseChannelDate(channelName: string, now?: Date): Date | null // "septembre-30" → Date (année déduite <= fin mois suivant)
 getBilanNameForDate(date: Date): string          // "bilan-septembre-2026"
 getMonthNameFr(date: Date): string               // "septembre"
+buildBilanMessages(date: Date, entries, maxLength?: number): string[] // découpage ≤ 2000 chars
 ```
 
 L'implémentation est cachée (voir §3.M1). **C'est le module le plus réutilisable**
@@ -131,10 +132,11 @@ utilisée par deux points d'entrée qui enregistrent exactement la même liste :
 
 ### C5 — Tests (vitest)
 
-Surface : 11 tests — 8 ciblant C1 (moteur calendrier : dates + utilitaires
-d'archivage `parseChannelDate`, `getBilanNameForDate`, `getMonthNameFr`) + 3
-ciblant C3 (inscription `InstallGlobalCommands` : name ≤ 32, description
-≤ 100, bulk overwrite, `fetch` stubbed). C2 (cycle des salons) et le handler
+Surface : 16 tests — 12 ciblant C1 (moteur calendrier : dates + utilitaires
+d'archivage `parseChannelDate`, `getBilanNameForDate`, `getMonthNameFr`,
+`buildBilanMessages`) + 4 ciblant C3 (inscription `InstallGlobalCommands` :
+name ≤ 32, description ≤ 100, bulk overwrite avec `fetch` stubbed, et
+permissions/contextes `ALL_COMMANDS`). C2 (cycle des salons) et le handler
 `/archive` ne sont pas testés en unit (couplage au `Client`, au cache
 `guild.channels` et au REST Discord).
 
@@ -416,9 +418,9 @@ la même liste, au moment où ils s'exécutent.
 
 ## 5. Testabilité — état actuel et préparation au TDD
 
-### Ce qui est déjà testé (11/11, `tests/utils.test.js`)
+### Ce qui est déjà testé (16/16, `tests/utils.test.js`)
 
-Tout le **Moteur calendrier (C1/M1)** (8 tests), plus **3 tests d'inscription `InstallGlobalCommands`** (seam C3, `fetch` stubbed, sans réseau) :
+Tout le **Moteur calendrier (C1/M1)** (12 tests : dates, parsing + passage d'année, formatage et découpage des bilans), plus **4 tests d'inscription et permissions** (seam C3, `fetch` stubbed, sans réseau) :
 
 | Test | Cible |
 |---|---|
@@ -548,10 +550,20 @@ discord.js (retries, auth intégrés) et supprimer `DiscordRequest` +
 
 ### 6.5 Robustesse du runtime
 
-- **Pas de null-check sur `interaction.guild`** : `/create_channel` est global
-  (pas de restriction d'intégration dans le PUT de `clientReady`) → utilisable
-  en DM ; `interaction.guild.channels` crasherait, catché par le `try/catch`
-  (message générique « ❌ Une erreur interne… »).
+- **✅ Résolu — garde-fous serveur, permissions & `catch` après `deferReply()`** :
+  `/create_channel` et `/archive` sont restreints au contexte serveur
+  (`contexts: [0]`, `integration_types: [0]`) avec
+  `default_member_permissions = ManageChannels`, et vérifient au runtime
+  `interaction.guild` + `memberPermissions.has(ManageChannels)` avant
+  `deferReply()`. Le `catch` global gère désormais `interaction.deferred` via
+  `editReply()` afin de ne plus laisser Discord bloqué sur « réfléchit… ».
+- **✅ Résolu — limite Discord 2000 caractères dans `/archive`** :
+  `buildBilanMessages()` (`utils.js`) découpe automatiquement le bilan en
+  plusieurs messages ≤ 2000 caractères et gère les pièces jointes / embeds.
+- **✅ Résolu — passage d'année dans `parseChannelDate()`** : `now` a
+  désormais une valeur par défaut (`new Date()`), le jour est validé par regex
+  stricte, et la déduction d'année est bornée à la fin du mois suivant (évite
+  d'attribuer une année future à un salon de décembre archivé en janvier).
 - **Aucun retry** si l'inscription des commandes échoue à `clientReady`
   (erreur loggée, `/create_channel` inexistante jusqu'au prochain restart).
 - **`npm start` sans `npm install`** : le premier `npm install` a **Killed** (OOM)
@@ -561,8 +573,8 @@ discord.js (retries, auth intégrés) et supprimer `DiscordRequest` +
   ne lit plus le cache local `salon.history` ; `getLastMessage(channel)`
   fait `channel.messages.fetch({ limit: 1, cache: false })` (REST, sans
   intent `GuildMessages`). Canal vide → `null` → la ligne de bilan affiche
-  `(message vide)`. Plus de `.last()` sur le cache local, donc ni crash ni
-  message fantôme.
+  `(message vide)`. *(Prérequis Discord Developer Portal : activer le toggle
+  **Message Content Intent** pour lire le texte des messages non-bot via REST.)*
 
 ---
 
@@ -594,7 +606,7 @@ src/
 app.js                        → ~10 lignes : createClient() + register()
                                 + attachHandlers() + login()
 tests/
-├── calendar.test.ts          → les 8 tests C1 + 3 tests d'inscription
+├── calendar.test.ts          → les 12 tests C1 + 4 tests C3
 ├── channels.test.ts          → TDD : FakeChannelManager, idempotence,
 │                               passage d'année, isolation d'erreur
 └── interactions.test.ts      → handlers testés avec mock Client
@@ -616,7 +628,7 @@ tests/
 | Clé | Où | Obligatoire ? |
 |---|---|---|
 | `DISCORD_TOKEN` | `app.js` (login + REST) | ✅ sans elle le bot ne démarre pas |
-| `APP_ID` | `commands.js` | ✅ sans lui `npm run register` échoue |
+| `APP_ID` | `register.js` | ✅ sans lui `npm run register` échoue |
 | `PUBLIC_KEY` | — (non utilisée) | ❌ (morte) |
 
 ### B. Scripts `package.json`
@@ -626,7 +638,7 @@ tests/
 | `start` | `node app.js` | Runtime du bot |
 | `dev` | `nodemon app.js` | Runtime avec reload |
 | `register` | `node register.js` | Bulk overwrite des 3 commandes globales |
-| `test` | `vitest run` | 11 tests (8 M1 : dates + archivage, 3 `InstallGlobalCommands`) |
+| `test` | `vitest run` | 16 tests (12 M1 : dates + archivage + bilans, 4 `InstallGlobalCommands` / `ALL_COMMANDS`) |
 
 ### C. Événements discord.js utilisés
 
