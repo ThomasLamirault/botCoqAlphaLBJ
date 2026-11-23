@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { PermissionFlagsBits } from 'discord.js';
+import { ChannelType, GuildChannelManager, PermissionFlagsBits, Role } from 'discord.js';
 import {
   getOpenDatesForCurrentAndNextMonth,
   getCategoryNameForDate,
@@ -8,6 +8,8 @@ import {
   getBilanNameForDate,
   getMonthNameFr,
   buildBilanMessages,
+  buildSessionChannelCreateOptions,
+  buildBilanChannelCreateOptions,
   InstallGlobalCommands,
 } from '../utils.js';
 import { ALL_COMMANDS } from '../commands.js';
@@ -215,5 +217,61 @@ describe('Tests utilitaires', () => {
       expect(cmd.contexts).toEqual([0]);
       expect(cmd.integration_types).toEqual([0]);
     }
+  });
+
+  // ─── Tests de régression discord.js v14 (parent_id envoyé au REST) ──────────
+
+  it('doit transmettre parent_id à l\'API REST Discord lors de la création d\'un salon de séance', async () => {
+    const postMock = vi.fn(async (_route, { body }) => ({ id: 'chan-1', ...body }));
+    const fakeRole = Object.assign(Object.create(Role.prototype), { id: 'guild-1' });
+    const fakeManager = {
+      guild: {
+        id: 'guild-1',
+        roles: { resolve: (id) => (id === 'guild-1' ? fakeRole : null) },
+        client: { users: { resolve: () => null } },
+      },
+      client: {
+        channels: { resolveId: (ch) => (typeof ch === 'string' ? ch : ch.id) },
+        rest: { post: postMock },
+        actions: { ChannelCreate: { handle: (data) => ({ channel: data }) } },
+      },
+    };
+
+    const options = buildSessionChannelCreateOptions({
+      name: 'novembre-22',
+      parentId: 'cat-dimanche-2026',
+      everyoneRoleId: 'guild-1',
+    });
+    await GuildChannelManager.prototype.create.call(fakeManager, options);
+
+    expect(postMock).toHaveBeenCalledTimes(1);
+    const [, { body }] = postMock.mock.calls[0];
+    expect(body.name).toBe('novembre-22');
+    expect(body.type).toBe(ChannelType.GuildText);
+    expect(body.parent_id).toBe('cat-dimanche-2026');
+  });
+
+  it('doit transmettre parent_id à l\'API REST Discord lors de la création d\'un canal de bilan sous archive', async () => {
+    const postMock = vi.fn(async (_route, { body }) => ({ id: 'chan-2', ...body }));
+    const fakeManager = {
+      guild: { id: 'guild-1' },
+      client: {
+        channels: { resolveId: (ch) => (typeof ch === 'string' ? ch : ch.id) },
+        rest: { post: postMock },
+        actions: { ChannelCreate: { handle: (data) => ({ channel: data }) } },
+      },
+    };
+
+    const options = buildBilanChannelCreateOptions({
+      name: 'bilan-octobre-2026',
+      parentId: 'cat-archive',
+    });
+    await GuildChannelManager.prototype.create.call(fakeManager, options);
+
+    expect(postMock).toHaveBeenCalledTimes(1);
+    const [, { body }] = postMock.mock.calls[0];
+    expect(body.name).toBe('bilan-octobre-2026');
+    expect(body.type).toBe(ChannelType.GuildText);
+    expect(body.parent_id).toBe('cat-archive');
   });
 });

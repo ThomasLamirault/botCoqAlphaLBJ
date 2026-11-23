@@ -8,6 +8,8 @@ import {
   parseChannelDate,
   getBilanNameForDate,
   buildBilanMessages,
+  buildSessionChannelCreateOptions,
+  buildBilanChannelCreateOptions,
 } from './utils.js';
 import { ALL_COMMANDS } from './commands.js';
 
@@ -137,17 +139,13 @@ client.on('interactionCreate', async interaction => {
 
         if (!channelExists) {
           try {
-            const newChan = await guild.channels.create({
-              name: dateName,
-              type: ChannelType.GuildText,
-              parentId: category.id,
-              permissionOverwrites: [
-                {
-                  id: guild.roles.everyone.id, // Tout le monde
-                  allow: ['ViewChannel', 'SendMessages'],
-                },
-              ],
-            });
+            const newChan = await guild.channels.create(
+              buildSessionChannelCreateOptions({
+                name: dateName,
+                parentId: category.id,
+                everyoneRoleId: guild.roles.everyone.id,
+              }),
+            );
             createdCount++;
             console.log(`Créé « ${dateName} » [id=${newChan.id}] sous « ${categoryName} » [id=${category.id}]`);
           } catch (err) {
@@ -325,11 +323,12 @@ client.on('interactionCreate', async interaction => {
         let bilanChannel = existing;
         if (!bilanChannel) {
           try {
-            bilanChannel = await guild.channels.create({
-              name: bilanName,
-              type: ChannelType.GuildText,
-              parentId: archiveId,
-            });
+            bilanChannel = await guild.channels.create(
+              buildBilanChannelCreateOptions({
+                name: bilanName,
+                parentId: archiveId,
+              }),
+            );
             console.log(`Créé canal de bilan « ${bilanName} » [id=${bilanChannel.id}]`);
           } catch (err) {
             console.error(`Impossible de créer le canal de bilan « ${bilanName} » :`, err);

@@ -78,7 +78,7 @@ déplacés de `Les DIMANCHE LBJ 2025` → `Les DIMANCHE LBJ 2026`.
 | `utils.js` | Bibliothèque | 10 exports : `DiscordRequest`, `InstallGlobalCommands`, `getOpenDatesForCurrentAndNextMonth`, `formatDateChannelName`, `getCategoryNameForDate`, `parseChannelDate`, `getBilanNameForDate`, `getMonthNameFr`, `buildBilanMessages`, `capitalize` |
 | `commands.js` | Bibliothèque (définitions) | 1 export : `ALL_COMMANDS` (`/create_channel` + `/test` + `/archive`) |
 | `register.js` | Script standalone | 1 appel : `InstallGlobalCommands(APP_ID, ALL_COMMANDS)` |
-| `tests/utils.test.js` | vitest | 17 tests (`utils.js` + `ALL_COMMANDS`) |
+| `tests/utils.test.js` | vitest | 19 tests (`utils.js` + `ALL_COMMANDS` + `GuildChannelManager.create`) |
 | `.env` | Configuration (gitignored) | `APP_ID`, `DISCORD_TOKEN`, `PUBLIC_KEY` |
 
 **Dépendances** : `discord.js@14.27.0` (cœur), `vitest` (tests), `nodemon` (dev), `dotenv` (env).
@@ -395,9 +395,9 @@ la même liste, au moment où ils s'exécutent.
 
 ## 5. Testabilité — état actuel et préparation au TDD
 
-### Ce qui est déjà testé (17/17, `tests/utils.test.js`)
+### Ce qui est déjà testé (19/19, `tests/utils.test.js`)
 
-Tout le **Moteur calendrier (C1/M1)** (13 tests : dates, parsing + passage d'année, formatage, tri chronologique et découpage des bilans), plus **4 tests d'inscription et permissions** (seam C3, `fetch` stubbed, sans réseau) :
+Tout le **Moteur calendrier (C1/M1)** (13 tests : dates, parsing + passage d'année, formatage, tri chronologique et découpage des bilans), **4 tests d'inscription et permissions** (seam C3, `fetch` stubbed), plus **2 tests de régression discord.js v14** (`buildSessionChannelCreateOptions` et `buildBilanChannelCreateOptions` passés au vrai `GuildChannelManager.prototype.create` vérifiant `body.parent_id`) :
 
 | Test | Cible |
 |---|---|
@@ -615,7 +615,7 @@ tests/
 | `start` | `node app.js` | Runtime du bot |
 | `dev` | `nodemon app.js` | Runtime avec reload |
 | `register` | `node register.js` | Bulk overwrite des 3 commandes globales |
-| `test` | `vitest run` | 17 tests (13 M1 : dates + archivage + bilans, 4 `InstallGlobalCommands` / `ALL_COMMANDS`) |
+| `test` | `vitest run` | 19 tests (13 M1 : dates + archivage + bilans, 4 `InstallGlobalCommands` / `ALL_COMMANDS`, 2 régression `GuildChannelManager.create`) |
 
 ### C. Événements discord.js utilisés
 

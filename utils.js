@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { ChannelType } from 'discord.js';
 
 export async function DiscordRequest(endpoint, options) {
   // append endpoint to root API URL
@@ -228,6 +229,28 @@ export function getBilanNameForDate(date) {
  */
 export function getMonthNameFr(date) {
   return MONTHS_FR[date.getMonth()];
+}
+
+export function buildSessionChannelCreateOptions({ name, parentId, everyoneRoleId }) {
+  return {
+    name,
+    type: ChannelType.GuildText,
+    parent: parentId,
+    permissionOverwrites: [
+      {
+        id: everyoneRoleId,
+        allow: ['ViewChannel', 'SendMessages'],
+      },
+    ],
+  };
+}
+
+export function buildBilanChannelCreateOptions({ name, parentId }) {
+  return {
+    name,
+    type: ChannelType.GuildText,
+    parent: parentId,
+  };
 }
 
 export function capitalize(str) {

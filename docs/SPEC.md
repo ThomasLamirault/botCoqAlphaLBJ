@@ -227,10 +227,11 @@ Bot CoqAlpha LBJ
 ### Branche 7 — Vérification & hors-périmètre explicite
 
 #### D7.1 — Contrat de tests unitaires
-- **Décision** : Suite `vitest` (`npm test`) dans [tests/utils.test.js](../tests/utils.test.js) couvrant **17 cas** sans accès réseau ni serveur Discord :
+- **Décision** : Suite `vitest` (`npm test`) dans [tests/utils.test.js](../tests/utils.test.js) couvrant **19 cas** sans accès réseau ni serveur Discord :
   - Moteur calendrier : fenêtres courante/suivante, passage d'année, nommage catégories et salons sans accent.
   - Archivage & bilans : `parseChannelDate` (cas valides, invalides, `now` par défaut, passage d'année sans faux positif futur), `getBilanNameForDate`, `getMonthNameFr`, `buildBilanMessages` (nettoyage liens/vides/pièces jointes/embeds, découpage ≤ 2000 chars, tri chronologique).
   - Enregistrement & sécurité : pré-validation `name ≤ 32` et `description ≤ 100`, payload `PUT` bulk overwrite (`fetch` stubbed), restrictions serveur + `ManageChannels` sur `/create_channel` et `/archive`.
+  - Régression discord.js v14 : `buildSessionChannelCreateOptions` et `buildBilanChannelCreateOptions` passés au vrai `GuildChannelManager.prototype.create` vérifiant l'envoi effectif de `parent_id` au REST Discord.
 
 #### D7.2 — Hors-périmètre assumé (Non-goals)
 - **Pas de déclenchement automatique (cron / scheduler)** : toutes les actions sont déclenchées manuellement par commande slash.
