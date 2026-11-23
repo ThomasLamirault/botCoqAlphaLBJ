@@ -21,10 +21,13 @@ du mois courant + du mois suivant, il existe :
 
 Un deuxième pilotage — **`/archive`** — consolide les salons **révolus**
 (mois précédent et plus anciens, à la date de l'appel) :
-1. déplacement de ces salons dans une catégorie **`archive`** (créée si absente) ;
-2. création d'un canal de **synthèse** par mois archivé : **`bilan-<mois>-<année>`**
-   (ex. `bilan-septembre-2026`), qui regroupe le **dernier message** de chaque
-   salon archivé.
+1. création (si absente) de la catégorie **`archive`** et d'un canal de
+   **synthèse** par mois archivé sous celle-ci : **`bilan-<mois>-<année>`**
+   (ex. `bilan-octobre-2026`), qui regroupe dans l'ordre chronologique le
+   **dernier message** de chaque salon révolu ;
+2. **suppression** des salons révolus correspondants (ex. `#octobre-4`)
+   uniquement après publication confirmée du bilan (les catégories
+   `Les DIMANCHE/LUNDI LBJ <année>` restent conservées).
 
 Exemple concret (exécuté le 18/10/2026) : salons `octobre-18` et `octobre-19`
 déplacés de `Les DIMANCHE LBJ 2025` → `Les DIMANCHE LBJ 2026`.
@@ -75,7 +78,7 @@ déplacés de `Les DIMANCHE LBJ 2025` → `Les DIMANCHE LBJ 2026`.
 | `utils.js` | Bibliothèque | 10 exports : `DiscordRequest`, `InstallGlobalCommands`, `getOpenDatesForCurrentAndNextMonth`, `formatDateChannelName`, `getCategoryNameForDate`, `parseChannelDate`, `getBilanNameForDate`, `getMonthNameFr`, `buildBilanMessages`, `capitalize` |
 | `commands.js` | Bibliothèque (définitions) | 1 export : `ALL_COMMANDS` (`/create_channel` + `/test` + `/archive`) |
 | `register.js` | Script standalone | 1 appel : `InstallGlobalCommands(APP_ID, ALL_COMMANDS)` |
-| `tests/utils.test.js` | vitest | 16 tests (`utils.js` + `ALL_COMMANDS`) |
+| `tests/utils.test.js` | vitest | 17 tests (`utils.js` + `ALL_COMMANDS`) |
 | `.env` | Configuration (gitignored) | `APP_ID`, `DISCORD_TOKEN`, `PUBLIC_KEY` |
 
 **Dépendances** : `discord.js@14.27.0` (cœur), `vitest` (tests), `nodemon` (dev), `dotenv` (env).
@@ -232,10 +235,10 @@ la même liste, au moment où ils s'exécutent.
 │ SMALL INTERFACE                                            │
 │   interaction.chatInput /archive                           │
 │   → 1 message récapitulatif                                │
-│     (récap : X déplacés / Y bilans — voir §4.1)            │
+│     (récap : Y bilans publiés / X salons supprimés)        │
 ├────────────────────────────────────────────────────────────┤
 │ DEEP IMPLEMENTATION                                        │
-│   • deferReply() public (anti-timeout)                     │
+│   • garde-fous : guild + ManageChannels, puis deferReply() │
 │   • now = new Date()                                       │
 │   • catégorie « archive » : cache.find(                    │
 │       type=GuildCategory && name='archive')                │
@@ -243,44 +246,34 @@ la même liste, au moment où ils s'exécutent.
 │       position: dernière + 1 })                            │
 │   • garde-fou : cible = vraie catégorie (type)             │
 │   • toArchive = salons texte hors « archive » dont         │
-│      jour) NON dans getOpenDatesForCurrentAndNextMonth(now)│
-│      lastMessage = getLastMessage(channel)                 │
-│      (= channel.messages.fetch({ limit: 1, cache: false }))│
-│      → null si canal vide (console.warn)                   │
-│      bilanName = getBilanNameForDate(date)                 │
-│      channels.edit(channel, { parent: archiveCat,          │
-│        reason: « archivage » (M/J YYYY) })                 │
-│        ok → archivedCount++, console.log()                 │
-│        entry { channel, date, lastMessage } push           │
-│        dans groupsByBilan[bilanName]                       │
-│        échec → console.error, skip (pas dans               │
-│        le bilan)                                           │
-│      try/catch isolé par salon (1 casse ≠ tout)            │
-│   • for [bilanName, group] de groupsByBilan :              │
+│     parseChannelDate(name, now) ≠ null ET (année, mois,    │
+│     jour) NON dans getOpenDatesForCurrentAndNextMonth(now) │
+│   • lecture préalable : getLastMessage(channel)            │
+│     → { ok: true, message } (null si vide) ou              │
+│     → { ok: false } (erreur API → salon ignoré/conservé)   │
+│     → regroupement par bilanName = getBilanNameForDate(d)  │
+│   • for [bilanName, group] (triés chronologiquement) :     │
+│       tri chronologique de group.entries                   │
 │       existing = cache.find(GuildText, name=bilanName,     │
 │         parentId = archiveId)                              │
 │       absent → channels.create({ type: GuildText,          │
 │         parentId: archiveId })  (perms héritées)           │
-│         (échec → skip ce groupe)                           │
-│       body = [                                             │
-│         « Bilan des salons archivés — {mois} {année} »     │
-│         « (_{N} salon(s) archivé(s) _) »                   │
-│         + « • {salon} → {content} » × N                    │
-│         ].join('\n')  (📊 + gras — voir §4.1)              │
-│       content : liens → [lien], retours à la ligne →       │
-│         espaces, trim, slice(500); vide → (message         │
-│         vide)                                              │
-│       bilanChannel.send(body) → bilansPublies++            │
-│       (un message par exécution : le canal accumule)       │
-│   • isolation d'erreur par mois (try/catch)                │
-│     → 1 bilan cassé ≠ toute l'exécution                    │
+│         (échec → skip ce mois, AUCUNE suppression)         │
+│       messages = buildBilanMessages(date, entries)         │
+│         (liens → [lien], trim, slice(500), découpe ≤ 2000) │
+│       for body of messages : bilanChannel.send(body)       │
+│         (échec → skip ce mois, AUCUNE suppression)         │
+│       bilansPublies++                                      │
+│       SEULEMENT APRÈS publication réussie :                │
+│       for { channel } of group.entries :                   │
+│         guild.channels.delete(channel, reason)             │
+│         (try/catch isolé par salon ; catégories conservées)│
 └────────────────────────────────────────────────────────────┘
 
 - **Leverage** : moyen. Fortement couplé aux objets `Guild` et aux effets REST
-  réels (lecture de l'historique, moves).
-- **Localité** : élevée. Toute la règle « quel salon est révolu, où le mettre,
-  quoi résumer » est concentrée ici — c'est le seul endroit à relire quand on
-  change la règle (ex. archiver 2 mois en arrière, format du message bilan).
+  réels (lecture de l'historique, publication bilans, suppressions).
+- **Localité** : élevée. Toute la règle « quel salon est révolu, quoi résumer,
+  quand supprimer » est concentrée ici.
 
 
 ---
@@ -331,7 +324,7 @@ la même liste, au moment où ils s'exécutent.
                                  ▼
                           editReply(
                             parts.length
-                              ? `✅ ${parts.join(' et')} !`
+                              ? `✅ ${parts.join(' et ')} !`
                               : « ℹ️ Tous les salons existent déjà… »
                           )
 ```
@@ -342,6 +335,7 @@ la même liste, au moment où ils s'exécutent.
 [user] ── /archive ──► [interactionCreate]
                           │
                           ▼
+                          garde-fous (guild + ManageChannels)
                           deferReply()      ← public, timeout 3 s évité
                           │
                           now = new Date()
@@ -358,69 +352,52 @@ la même liste, au moment où ils s'exécutent.
                           GuildCategory (sinon ❌ reply)
                           │
                           toArchive = salons texte hors « archive » dont
-                          parseChannelDate(name, now) ≠ null ET (mois, jour)
-                          NON dans getOpenDatesForCurrentAndNextMonth(now)
-                          (slots actifs = dim + lun du mois courant + suivant)
+                          parseChannelDate(name, now) ≠ null ET (année,
+                          mois, jour) NON dans getOpenDatesForCurrentAndNextMonth(now)
                           │
                           toArchive = 0 → « Rien à archiver : … » (reply)
                           │
                      ┌────┴───────────────────────────────────────────────────────┐
-                     │ POUR CHAQUE { channel, date } de toArchive :               │
-                     │ ① lastMessage = getLastMessage(channel)                    │
-                     │    = channel.messages.fetch({ limit: 1, cache: false })    │
-                     │    → null si canal vide (console.warn)                     │
-                     │ ② bilanName = getBilanNameForDate(date)                    │
-                     │ ③ channels.edit(channel, {                                 │
-                     │      parent: archiveCategory,                              │
-                     │      reason: « Archivage de ... » (M/J YYYY)               │
-                     │      ok → archivedCount++, console.log()                   │
-                     │         entry { channel, date, lastMessage }               │
-                     │         push dans groupsByBilan[bilanName]                 │
-                     │      échec → console.error, skip (pas dans                 │
-                     │      le bilan)                                             │
-                     │ ④ try/catch isolé par salon (1 casse ≠ tout)               │
+                     │ 1. LECTURE PRÉALABLE (pour chaque { channel, date }) :     │
+                     │    { ok, message } = getLastMessage(channel)               │
+                     │    • ok === false → skippedReadCount++ (salon conservé)    │
+                     │    • ok === true  → groupé dans groupsByBilan[bilanName]   │
                      └────────────────────────────────────────────────────────────┘
                           │
-                          FOR [bilanName, group] de groupsByBilan :
+                          FOR [bilanName, group] (triés par date croissante) :
                           │
                      ┌────┴───────────────────────────────────────────────────────┐
-                     │ existing = cache.find(GuildText, name=bilanName,           │
-                     │   parentId = archiveId)                                    │
+                     │ 2. BILAN SOUS « archive » :                                │
+                     │    tri chronologique de group.entries                      │
+                     │    existing = cache.find(GuildText, name=bilanName,        │
+                     │      parentId = archiveId)                                 │
+                     │    absent → channels.create({ type: GuildText,             │
+                     │      parentId: archiveId }) (échec → skip, rien supprimé)  │
+                     │    messages = buildBilanMessages(date, entries)            │
+                     │      (≤ 2000 chars par message, liens → [lien])            │
+                     │    for body of messages : bilanChannel.send(body)          │
+                     │      (échec → skip ce mois, rien supprimé)                 │
+                     │    bilansPublies++                                         │
                      │                                                            │
-                     │ absent → channels.create({ type: GuildText,                │
-                     │   parentId: archiveId })  (perms héritées)                 │
-                     │   (échec → skip ce groupe)                                 │
-                     │                                                            │
-                     │ body = [                                                   │
-                     │   « 📊 **Bilan des salons archivés —                       │
-                     │   {mois FR} {année} ** »,                                  │
-                     │   « (_{N} salon(s) archivé(s) _) »,                        │
-                     │   « • {salon} → {content} » (× N salons)                   │
-                     │   ].join('\n')                                             │
-                     │                                                            │
-                     │ content : liens → [lien], retours à la ligne →             │
-                     │   espaces, trim, slice(500) ; vide → (message              │
-                     │   vide)                                                    │
-                     │                                                            │
-                     │ bilanChannel.send(body) → bilansPublies++                  │
-                     │   (un message par exécution : le canal accumule)           │
-                     │                                                            │
-                     │ try/catch isolé par mois (1 casse ≠ tout)                  │
+                     │ 3. SUPPRESSION POST-BILAN :                                │
+                     │    for { channel } of group.entries :                      │
+                     │      guild.channels.delete(channel, reason) → deletedCount++│
+                     │      (catégories Les DIMANCHE/LUNDI LBJ conservées)        │
                      └────────────────────────────────────────────────────────────┘
                           │
                           ▼
                           summary = « ✅ Archivage terminé :
-                            • X déplacé(s) dans « archive »
-                            • Y canal(s) de bilan publié(s) »
+                            • Y canal(s) de bilan publié(s) dans « archive »
+                            • X salon(s) révolu(s) supprimé(s) »
                           editReply({ content: summary })
 
 ---
 
 ## 5. Testabilité — état actuel et préparation au TDD
 
-### Ce qui est déjà testé (16/16, `tests/utils.test.js`)
+### Ce qui est déjà testé (17/17, `tests/utils.test.js`)
 
-Tout le **Moteur calendrier (C1/M1)** (12 tests : dates, parsing + passage d'année, formatage et découpage des bilans), plus **4 tests d'inscription et permissions** (seam C3, `fetch` stubbed, sans réseau) :
+Tout le **Moteur calendrier (C1/M1)** (13 tests : dates, parsing + passage d'année, formatage, tri chronologique et découpage des bilans), plus **4 tests d'inscription et permissions** (seam C3, `fetch` stubbed, sans réseau) :
 
 | Test | Cible |
 |---|---|
@@ -638,7 +615,7 @@ tests/
 | `start` | `node app.js` | Runtime du bot |
 | `dev` | `nodemon app.js` | Runtime avec reload |
 | `register` | `node register.js` | Bulk overwrite des 3 commandes globales |
-| `test` | `vitest run` | 16 tests (12 M1 : dates + archivage + bilans, 4 `InstallGlobalCommands` / `ALL_COMMANDS`) |
+| `test` | `vitest run` | 17 tests (13 M1 : dates + archivage + bilans, 4 `InstallGlobalCommands` / `ALL_COMMANDS`) |
 
 ### C. Événements discord.js utilisés
 

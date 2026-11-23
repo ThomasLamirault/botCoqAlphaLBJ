@@ -9,7 +9,7 @@ Le bot calcule automatiquement les dates d'ouverture du club pour le mois en cou
 - Création automatique des channels : `août-x`, `septembre-y`, etc.
 - Synchronisation hebdomadaire (Lundi & Dimanche).
 - Permission par défaut : Visible/Envoyer des messages pour tout le monde (#everyone).
-- **Archivage (`/archive`)** : déplace les salons révolus dans la catégorie `archive` et crée un canal `bilan-<mois>-<année>` par mois archivé (synthèse du dernier message de chaque salon).
+- **Archivage (`/archive`)** : publie un canal de synthèse `bilan-<mois>-<année>` sous la catégorie `archive` (dernier message de chaque salon révolu, trié chronologiquement), puis supprime les salons révolus correspondants.
 
 ## 🚀 Installation & Démarrage
 
@@ -48,7 +48,7 @@ Le bot a besoin de variables d'environnement pour s'authentifier. Créez un fich
 |----------|-------------|------------|
 | `/test` | Vérifie que le bot écoute bien les événements. | Tous |
 | `/create_channel` | Déclenche la génération des channels du mois. | Admin/Modérateur |
-| `/archive` | Déplace les salons révolus dans la catégorie `archive` + canal de bilan `bilan-<mois>-<année>` (dernier message par salon). | Admin/Modérateur |
+| `/archive` | Publie un canal `bilan-<mois>-<année>` sous la catégorie `archive` (dernier message par salon) puis supprime les salons révolus. | Admin/Modérateur |
 
 ---
 *Ce projet est sous licence MIT. Inspiré par [discord/getting-started] mais adapté pour l'usage local.*

@@ -26,20 +26,20 @@ client.once('clientReady', async () => {
 });
 
 // Récupère le dernier (plus récent) message d'un canal de texte.
-// `channel.messages.fetch({ limit: 1, cache: false })` retourne une
-// Collection d'au plus un élément ; l'API Discord renvoie les messages du
-// plus récent au plus ancien, donc ce unique élément est le dernier message.
+// Distingue un canal légitimement vide ({ ok: true, message: null }) d'une
+// erreur de lecture API ({ ok: false, message: null }) afin de ne jamais
+// supprimer un salon dont le dernier message n'a pas pu être lu.
 async function getLastMessage(channel) {
   try {
     const messages = await channel.messages.fetch({ limit: 1, cache: false });
-    if (!messages.size) return null;
-    return messages.first();
+    if (!messages.size) return { ok: true, message: null };
+    return { ok: true, message: messages.first() };
   } catch (err) {
     console.warn(
       `Impossible de lire le dernier message de « ${channel.name} » :`,
       err.message ?? err,
     );
-    return null;
+    return { ok: false, message: null };
   }
 }
 
@@ -276,25 +276,18 @@ client.on('interactionCreate', async interaction => {
         });
       }
 
-      // Déplacer chaque salon dans « archive » + lire son dernier message.
-      let archivedCount = 0;
+      // 1. Lire le dernier message de chaque salon éligible et grouper par mois.
+      // Sécurité : si la lecture échoue (erreur API/permission), on ignore le
+      // salon pour ne ni publier de bilan incomplet ni le supprimer.
+      let skippedReadCount = 0;
       const groupsByBilan = new Map(); // nomBilan -> { date, entries: [] }
       for (const { channel, date } of toArchive) {
-        const lastMessage = await getLastMessage(channel);
-        const bilanName = getBilanNameForDate(date);
-        try {
-          await guild.channels.edit(channel, {
-            parent: archiveCategory,
-            reason: `Archivage de « ${channel.name} » (${date.getMonth() + 1}/${date.getDate()} ${date.getFullYear()}) dans « ${ARCHIVE_NAME} »`,
-          });
-          archivedCount++;
-          console.log(
-            `Archivé « ${channel.name} » [id=${channel.id}] → « ${ARCHIVE_NAME} » [id=${archiveId}]`,
-          );
-        } catch (err) {
-          console.error(`Impossible d'archiver « ${channel.name} » :`, err);
-          continue; // canal non déplacé : on ne le met pas dans le bilan
+        const { ok, message: lastMessage } = await getLastMessage(channel);
+        if (!ok) {
+          skippedReadCount++;
+          continue;
         }
+        const bilanName = getBilanNameForDate(date);
         if (groupsByBilan.has(bilanName)) {
           groupsByBilan.get(bilanName).entries.push({ channel, date, lastMessage });
         } else {
@@ -302,9 +295,27 @@ client.on('interactionCreate', async interaction => {
         }
       }
 
-      // Un canal de synthèse par (mois, année) : bilan-<mois>-<année>.
+      if (groupsByBilan.size === 0) {
+        return await interaction.editReply({
+          content: `❌ Impossible de lire les salons révolus (${skippedReadCount} erreur(s)) : aucun bilan publié et aucun salon supprimé.`,
+        });
+      }
+
+      // 2. Pour chaque (mois, année) : publier D'ABORD le bilan dans
+      // « bilan-<mois>-<année> » sous « archive », puis supprimer les salons
+      // révolus correspondants uniquement si la publication a réussi.
       let bilansPublies = 0;
-      for (const [bilanName, group] of groupsByBilan.entries()) {
+      let deletedCount = 0;
+      let deleteFailedCount = 0;
+      const sortedGroups = [...groupsByBilan.entries()].sort(
+        ([, a], [, b]) => a.date - b.date,
+      );
+
+      for (const [bilanName, group] of sortedGroups) {
+        group.entries.sort(
+          (a, b) => a.date - b.date || a.channel.name.localeCompare(b.channel.name),
+        );
+
         const existing = guild.channels.cache.find(
           (ch) =>
             ch.type === ChannelType.GuildText &&
@@ -322,13 +333,15 @@ client.on('interactionCreate', async interaction => {
             console.log(`Créé canal de bilan « ${bilanName} » [id=${bilanChannel.id}]`);
           } catch (err) {
             console.error(`Impossible de créer le canal de bilan « ${bilanName} » :`, err);
-            continue;
+            continue; // bilan non créé : on ne supprime aucun salon de ce mois
           }
         }
+
         const messages = buildBilanMessages(
           group.date,
           group.entries.map((e) => ({
             channelName: e.channel.name,
+            date: e.date,
             content: e.lastMessage?.content,
             hasAttachments: (e.lastMessage?.attachments?.size ?? 0) > 0,
             hasEmbeds: (e.lastMessage?.embeds?.length ?? 0) > 0,
@@ -342,15 +355,42 @@ client.on('interactionCreate', async interaction => {
           console.log(`Bilan publié dans « ${bilanName} » [id=${bilanChannel.id}] (${messages.length} message(s))`);
         } catch (err) {
           console.error(`Impossible de publier le bilan « ${bilanName} » :`, err);
+          continue; // bilan non publié : on ne supprime aucun salon de ce mois
+        }
+
+        // Bilan confirmé publié : suppression des salons révolus de ce mois.
+        // Les catégories (ex. Les DIMANCHE LBJ <année>) sont conservées.
+        for (const { channel, date } of group.entries) {
+          try {
+            await guild.channels.delete(
+              channel,
+              `Archivage de « ${channel.name} » (${date.getMonth() + 1}/${date.getDate()} ${date.getFullYear()}) : bilan publié dans « ${bilanName} »`,
+            );
+            deletedCount++;
+            console.log(
+              `Supprimé « ${channel.name} » [id=${channel.id}] (bilan publié dans « ${bilanName} »)`,
+            );
+          } catch (err) {
+            deleteFailedCount++;
+            console.error(`Impossible de supprimer « ${channel.name} » :`, err);
+          }
         }
       }
 
-      const summary = [
+      const summaryLines = [
         `✅ Archivage terminé :`,
-        `• **${archivedCount}** salon(s) déplacé(s) dans « ${ARCHIVE_NAME} »`,
-        `• **${bilansPublies}** canal(s) de bilan ${bilansPublies === 1 ? 'publié' : 'publiés'}`,
-      ].join('\n');
-      return await interaction.editReply({ content: summary });
+        `• **${bilansPublies}** canal(s) de bilan ${bilansPublies === 1 ? 'publié' : 'publiés'} dans « ${ARCHIVE_NAME} »`,
+        `• **${deletedCount}** salon(s) révolu(s) supprimé(s)`,
+      ];
+      if (skippedReadCount > 0) {
+        summaryLines.push(
+          `• ⚠️ **${skippedReadCount}** salon(s) conservé(s) (lecture du dernier message impossible)`,
+        );
+      }
+      if (deleteFailedCount > 0) {
+        summaryLines.push(`• ⚠️ **${deleteFailedCount}** suppression(s) en échec`);
+      }
+      return await interaction.editReply({ content: summaryLines.join('\n') });
     }
 
   } catch (error) {

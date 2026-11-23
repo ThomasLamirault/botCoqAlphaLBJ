@@ -147,14 +147,23 @@ export function parseChannelDate(channelName, now = new Date()) {
 /**
  * Construit un ou plusieurs messages de bilan mensuel respectant la limite
  * Discord de 2000 caractères par message.
+ * Si les entrées portent une propriété `date`, elles sont triées par ordre
+ * chronologique croissant.
  *
  * @param {Date} date Date représentative du mois archivé
- * @param {Array<{ channelName: string, content?: string|null, hasAttachments?: boolean, hasEmbeds?: boolean }>} entries
+ * @param {Array<{ channelName: string, date?: Date, content?: string|null, hasAttachments?: boolean, hasEmbeds?: boolean }>} entries
  * @param {number} [maxLength=2000] Longueur maximale d'un message Discord
  * @returns {string[]} Liste des messages prêts à envoyer
  */
 export function buildBilanMessages(date, entries, maxLength = 2000) {
   const SNIP = 500;
+  const sortedEntries = [...entries].sort((a, b) => {
+    if (a.date && b.date) {
+      return a.date - b.date || a.channelName.localeCompare(b.channelName);
+    }
+    return 0;
+  });
+
   const cleanMsg = (entry) => {
     const cleaned = (entry.content ?? '')
       .replace(/https?:\/\/\S+/g, '[lien]')
@@ -169,11 +178,11 @@ export function buildBilanMessages(date, entries, maxLength = 2000) {
 
   const header = [
     `📊 **Bilan des salons archivés — ${getMonthNameFr(date)} ${date.getFullYear()}**`,
-    `(_${entries.length} salon(s) archivé(s)_)`,
+    `(_${sortedEntries.length} salon(s) archivé(s)_)`,
     '',
   ].join('\n');
 
-  const lines = entries.map((e) => {
+  const lines = sortedEntries.map((e) => {
     const line = `• ${e.channelName} → ${cleanMsg(e)}`;
     return line.length > maxLength ? `${line.slice(0, maxLength - 1)}…` : line;
   });

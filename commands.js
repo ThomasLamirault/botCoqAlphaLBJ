@@ -29,7 +29,7 @@ const TEST_COMMAND = {
 
 const ARCHIVE_COMMAND = {
   name: 'archive',
-  description: 'Archiver les salons révolus dans la catégorie « archive » + canal de bilan mensuel',
+  description: 'Publier un bilan mensuel sous « archive » et supprimer les salons révolus',
   type: 1,
   default_member_permissions: MANAGE_CHANNELS_PERM,
   integration_types: [0],

@@ -145,6 +145,20 @@ describe('Tests utilitaires', () => {
     expect(msgs.join('\n')).toContain('septembre-8');
   });
 
+  it('doit trier les entrées du bilan par ordre chronologique quand date est fournie', () => {
+    const msgs = buildBilanMessages(new Date(2026, 9, 1), [
+      { channelName: 'octobre-19', date: new Date(2026, 9, 19), content: 'Séance 4' },
+      { channelName: 'octobre-4', date: new Date(2026, 9, 4), content: 'Séance 1' },
+      { channelName: 'octobre-12', date: new Date(2026, 9, 12), content: 'Séance 3' },
+      { channelName: 'octobre-5', date: new Date(2026, 9, 5), content: 'Séance 2' },
+    ]);
+    expect(msgs).toHaveLength(1);
+    const body = msgs[0];
+    expect(body.indexOf('octobre-4')).toBeLessThan(body.indexOf('octobre-5'));
+    expect(body.indexOf('octobre-5')).toBeLessThan(body.indexOf('octobre-12'));
+    expect(body.indexOf('octobre-12')).toBeLessThan(body.indexOf('octobre-19'));
+  });
+
   it('doit produire le bon nom de canal de bilan (mois sans accent)', () => {
     expect(getBilanNameForDate(new Date(2026, 8, 30))).toBe('bilan-septembre-2026');
     expect(getBilanNameForDate(new Date(2026, 11, 3))).toBe('bilan-decembre-2026');
